@@ -32,8 +32,8 @@ interface GitHubStar {
   repo: GitHubRepo;
 }
 
-export async function fetchUserStars(username: string) {
-  console.log(`[GitHub API] Starting fetchUserStars for username: ${username}`);
+export async function fetchUserStars(username: string, lastSyncedAt?: string) {
+  console.log(`[GitHub API] Starting fetchUserStars for username: ${username}, lastSyncedAt: ${lastSyncedAt || 'None'}`);
   if (!username) {
     console.warn('[GitHub API] fetchUserStars called with empty username, returning empty array');
     return [];
@@ -44,10 +44,9 @@ export async function fetchUserStars(username: string) {
   let allStars: GitHubStar[] = [];
   let page = 1;
   const perPage = 100;
+  let hasMore = true;
 
-  // For demo purposes, we'll just fetch the first page or two to avoid rate limits
-  // In a real app, you'd want to paginate through all results
-  while (page <= 2) {
+  while (hasMore) {
     const url = token 
       ? `${GITHUB_API_URL}/user/starred?page=${page}&per_page=${perPage}`
       : `${GITHUB_API_URL}/users/${username}/starred?page=${page}&per_page=${perPage}`;
@@ -80,16 +79,32 @@ export async function fetchUserStars(username: string) {
     console.log(`[GitHub API] Fetched ${data.length} stars on page ${page}`);
     if (data.length === 0) break;
 
-    allStars = [...allStars, ...data];
+    // Check if we reached stars that are older than lastSyncedAt
+    if (lastSyncedAt) {
+      const lastSyncedDate = new Date(lastSyncedAt);
+      const newStars = data.filter((item: GitHubStar) => new Date(item.starred_at) > lastSyncedDate);
+      allStars = [...allStars, ...newStars];
+      
+      // If we found stars older than lastSyncedAt, we can stop fetching
+      if (newStars.length < data.length) {
+        hasMore = false;
+        break;
+      }
+    } else {
+      allStars = [...allStars, ...data];
+      // For initial sync without lastSyncedAt, we still limit pages to avoid excessive fetching
+      if (page >= 5) hasMore = false; // Fetch up to 500 stars initially
+    }
+
     page++;
   }
 
-  console.log(`[GitHub API] Completed fetchUserStars. Total stars fetched: ${allStars.length}`);
+  console.log(`[GitHub API] Completed fetchUserStars. Total new stars fetched: ${allStars.length}`);
   return allStars;
 }
 
-export async function fetchUserForks(username: string) {
-  console.log(`[GitHub API] Starting fetchUserForks for username: ${username}`);
+export async function fetchUserForks(username: string, lastSyncedAt?: string) {
+  console.log(`[GitHub API] Starting fetchUserForks for username: ${username}, lastSyncedAt: ${lastSyncedAt || 'None'}`);
   if (!username) {
     console.warn('[GitHub API] fetchUserForks called with empty username, returning empty array');
     return [];
@@ -100,9 +115,11 @@ export async function fetchUserForks(username: string) {
   let allForks: GitHubRepo[] = [];
   let page = 1;
   const perPage = 100;
+  let hasMore = true;
 
-  while (page <= 2) {
-    const url = `${GITHUB_API_URL}/users/${username}/repos?type=forks&page=${page}&per_page=${perPage}`;
+  while (hasMore) {
+    // Add sort=created&direction=desc to get newest forks first
+    const url = `${GITHUB_API_URL}/users/${username}/repos?type=forks&sort=created&direction=desc&page=${page}&per_page=${perPage}`;
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github.v3+json',
     };
@@ -136,12 +153,29 @@ export async function fetchUserForks(username: string) {
 
     // Filter only forks since the API might return other repos depending on parameters
     const forks = data.filter((repo: GitHubRepo) => repo.fork);
-    console.log(`[GitHub API] Fetched ${data.length} repos on page ${page}, filtered to ${forks.length} actual forks`);
-    allForks = [...allForks, ...forks];
+    
+    if (lastSyncedAt) {
+      const lastSyncedDate = new Date(lastSyncedAt);
+      const newForks = forks.filter((repo: GitHubRepo) => new Date(repo.created_at) > lastSyncedDate);
+      console.log(`[GitHub API] Fetched ${data.length} repos on page ${page}, filtered to ${newForks.length} new forks`);
+      allForks = [...allForks, ...newForks];
+      
+      // If we found forks older than lastSyncedAt, stop fetching
+      if (newForks.length < forks.length) {
+        hasMore = false;
+        break;
+      }
+    } else {
+      console.log(`[GitHub API] Fetched ${data.length} repos on page ${page}, filtered to ${forks.length} actual forks`);
+      allForks = [...allForks, ...forks];
+      // Limit initial fetch to avoid rate limits
+      if (page >= 5) hasMore = false; // Up to 500 repos initially
+    }
+    
     page++;
   }
 
-  console.log(`[GitHub API] Completed fetchUserForks. Total forks fetched: ${allForks.length}`);
+  console.log(`[GitHub API] Completed fetchUserForks. Total new forks fetched: ${allForks.length}`);
   return allForks;
 }
 
@@ -160,7 +194,7 @@ export async function syncGitHubData(userId: string, githubId: string, username:
     // Check if a user with this github_id already exists but with a different id
     const { data: existingUser } = await supabase
       .from('users')
-      .select('id')
+      .select('id, last_synced_at')
       .eq('github_id', String(githubId))
       .single();
 
@@ -183,6 +217,7 @@ export async function syncGitHubData(userId: string, githubId: string, username:
         id: userId,
         github_id: String(githubId), // ensure string
         username: username,
+        last_login_at: new Date().toISOString(), // Update last login time during sync
       }, { onConflict: 'id' })
       .select();
 
@@ -200,8 +235,8 @@ export async function syncGitHubData(userId: string, githubId: string, username:
         }
     }
     
-    // VERIFY USER EXISTS
-    const { data: checkUser } = await supabase.from('users').select('id').eq('id', userId).single();
+    // VERIFY USER EXISTS and get last_synced_at
+    const { data: checkUser } = await supabase.from('users').select('id, last_synced_at').eq('id', userId).single();
     if (!checkUser) {
       console.error('[Sync Process] ❌ Critical: User was not found in the database even after upsert attempt. Cannot proceed with foreign key relations.');
       alert('Critical Database Error: Failed to create or find your user record in the database. Please contact support or check database logs.');
@@ -209,12 +244,15 @@ export async function syncGitHubData(userId: string, githubId: string, username:
     }
     
     console.log('[Sync Process] ✅ User successfully verified/upserted in DB:', userData);
+    
+    const lastSyncedAt = checkUser.last_synced_at;
+    console.log(`[Sync Process] User last synced at: ${lastSyncedAt || 'Never'}`);
 
     // 1. Fetch data from GitHub
     console.log('[Sync Process] Step 1: Fetching Stars and Forks data from GitHub API...');
     const [starsData, forksData] = await Promise.all([
-      fetchUserStars(username),
-      fetchUserForks(username)
+      fetchUserStars(username, lastSyncedAt),
+      fetchUserForks(username, lastSyncedAt)
     ]);
 
     console.log(`[Sync Process] ✅ Successfully fetched ${starsData.length} stars and ${forksData.length} forks from GitHub`);
@@ -345,6 +383,41 @@ export async function syncGitHubData(userId: string, githubId: string, username:
       }
     } else {
       console.log('[Sync Process] No new projects to insert or link. Skipping DB steps.');
+    }
+
+    // 4. Update last_synced_at
+    console.log('[Sync Process] Step 4: Updating last_synced_at for user...');
+    const { error: updateSyncError } = await supabase
+      .from('users')
+      .update({ last_synced_at: new Date().toISOString() })
+      .eq('id', userId);
+
+    if (updateSyncError) {
+      console.error('[Sync Process] ❌ Error updating last_synced_at:', updateSyncError);
+    } else {
+      console.log('[Sync Process] ✅ Successfully updated last_synced_at');
+    }
+
+    // 5. Perform automatic cleanup
+    console.log('[Sync Process] Step 5: Performing automatic data cleanup...');
+    try {
+      // Clean up users inactive for 30 days
+      const { error: timeCleanupError } = await supabase.rpc('cleanup_inactive_users', { days_inactive: 30 });
+      if (timeCleanupError) {
+        console.warn('[Sync Process] Warning: Failed to run time-based cleanup:', timeCleanupError);
+      } else {
+        console.log('[Sync Process] ✅ Completed time-based cleanup');
+      }
+
+      // Clean up oldest users if we exceed 1000 users
+      const { error: capacityCleanupError } = await supabase.rpc('cleanup_old_users', { max_users: 1000 });
+      if (capacityCleanupError) {
+        console.warn('[Sync Process] Warning: Failed to run capacity-based cleanup:', capacityCleanupError);
+      } else {
+        console.log('[Sync Process] ✅ Completed capacity-based cleanup');
+      }
+    } catch (cleanupError) {
+      console.error('[Sync Process] ❌ Error during cleanup phase:', cleanupError);
     }
 
     console.log(`[Sync Process] 🎉 SYNC COMPLETED SUCCESSFULLY`);
