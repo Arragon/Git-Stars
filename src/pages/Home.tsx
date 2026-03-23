@@ -12,6 +12,7 @@ export const Home: React.FC = () => {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'github',
         options: {
+          // Use the current origin dynamically so it works on any deployment domain
           redirectTo: `${window.location.origin}/dashboard`,
           scopes: 'read:user user:email'
         }
