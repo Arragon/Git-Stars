@@ -2,6 +2,77 @@ import { supabase } from './supabaseClient';
 
 const GITHUB_API_URL = 'https://api.github.com';
 
+export async function analyzeProjectActivity(fullName: string) {
+  console.log(`[GitHub API] Analyzing activity for ${fullName}`);
+  const token = await getGithubToken();
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github.v3+json',
+  };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  // Last 30 days
+  const date = new Date();
+  date.setDate(date.getDate() - 30);
+  const since = date.toISOString();
+
+  try {
+    const [commitsRes, issuesRes, releasesRes] = await Promise.all([
+      fetch(`${GITHUB_API_URL}/repos/${fullName}/commits?since=${since}&per_page=100`, { headers }),
+      fetch(`${GITHUB_API_URL}/repos/${fullName}/issues?since=${since}&state=all&per_page=100`, { headers }),
+      fetch(`${GITHUB_API_URL}/repos/${fullName}/releases?per_page=100`, { headers })
+    ]);
+
+    // Gracefully handle rate limits or repository not found errors
+    if (!commitsRes.ok || !issuesRes.ok || !releasesRes.ok) {
+      console.warn(`[GitHub API] Failed to fetch some data for ${fullName}.`);
+      throw new Error('Failed to fetch project activity data');
+    }
+
+    const [commits, issuesAndPrs, releases] = await Promise.all([
+      commitsRes.json(),
+      issuesRes.json(),
+      releasesRes.json()
+    ]);
+
+    // Handle potential API errors (e.g., repository is empty, disabled, etc.)
+    const commitsCount = Array.isArray(commits) ? commits.length : 0;
+    const issuesAndPrsArray = Array.isArray(issuesAndPrs) ? issuesAndPrs : [];
+    const releasesArray = Array.isArray(releases) ? releases : [];
+    
+    // GitHub API returns PRs in the issues endpoint. We differentiate by checking the pull_request property
+    const prsCount = issuesAndPrsArray.filter((item: any) => item.pull_request).length;
+    const issuesCount = issuesAndPrsArray.length - prsCount;
+    
+    // Releases in last 30 days
+    const recentReleasesCount = releasesArray.filter((r: any) => new Date(r.published_at) > date).length;
+
+    // Calculate an activity index (max 100)
+    // - Commits: max 50 points (2 pts each)
+    // - PRs: max 20 points (4 pts each)
+    // - Issues: max 20 points (2 pts each)
+    // - Releases: max 10 points (10 pts each)
+    const commitScore = Math.min(commitsCount * 2, 50);
+    const prScore = Math.min(prsCount * 4, 20);
+    const issueScore = Math.min(issuesCount * 2, 20);
+    const releaseScore = Math.min(recentReleasesCount * 10, 10);
+    
+    const activityIndex = Math.min(commitScore + prScore + issueScore + releaseScore, 100);
+
+    return {
+      index: activityIndex,
+      details: {
+        commits: commitsCount,
+        issues: issuesCount,
+        prs: prsCount,
+        releases: recentReleasesCount
+      }
+    };
+  } catch (error) {
+    console.error(`[GitHub API] Error analyzing activity for ${fullName}:`, error);
+    throw error;
+  }
+}
+
 async function getGithubToken() {
   console.log('[GitHub Utils] Attempting to get GitHub token from session...');
   const { data: { session }, error } = await supabase.auth.getSession();

@@ -15,6 +15,17 @@ export interface Project {
   created_at?: string;
   github_created_at?: string;
   github_updated_at?: string;
+  activity_index?: number;
+  activity_details?: {
+    commits: number;
+    issues: number;
+    prs: number;
+    releases: number;
+  };
+  activity_analyzed_at?: string;
+  ai_summary?: string;
+  ai_tags?: string[];
+  is_summarizing?: boolean; // Ephemeral state for UI only
 }
 
 interface DashboardState {
@@ -28,8 +39,10 @@ interface DashboardState {
   setFilterType: (type: 'all' | 'star' | 'fork') => void;
   filterLanguage: string;
   setFilterLanguage: (language: string) => void;
-  sortBy: 'starred_at' | 'stars_count' | 'name';
-  setSortBy: (sort: 'starred_at' | 'stars_count' | 'name') => void;
+  filterTag: string;
+  setFilterTag: (tag: string) => void;
+  sortBy: 'starred_at' | 'stars_count' | 'name' | 'activity';
+  setSortBy: (sort: 'starred_at' | 'stars_count' | 'name' | 'activity') => void;
   sortOrder: 'asc' | 'desc';
   setSortOrder: (order: 'asc' | 'desc') => void;
 }
@@ -45,6 +58,8 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   setFilterType: (filterType) => set({ filterType }),
   filterLanguage: 'all',
   setFilterLanguage: (filterLanguage) => set({ filterLanguage }),
+  filterTag: 'all',
+  setFilterTag: (filterTag) => set({ filterTag }),
   sortBy: 'starred_at',
   setSortBy: (sortBy) => set({ sortBy }),
   sortOrder: 'desc',

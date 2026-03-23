@@ -55,8 +55,8 @@ export const Layout: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <nav className="bg-gray-900 text-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <nav className="bg-gray-900 text-white shadow-sm flex-shrink-0 z-10 relative">
+        <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             <div className="flex items-center cursor-pointer" onClick={() => user ? navigate('/dashboard') : navigate('/')}>
               <Github className="h-8 w-8 text-white" />
@@ -88,7 +88,7 @@ export const Layout: React.FC = () => {
         </div>
       </nav>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 overflow-hidden">
         <Outlet />
       </main>
 
