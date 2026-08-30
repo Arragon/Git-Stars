@@ -1,18 +1,38 @@
 import React, { useState } from 'react';
 import { Project } from '../store/useDashboardStore';
-import { Star, GitFork, ExternalLink, Calendar, BookMarked, Sparkles, Loader2, Tag } from 'lucide-react';
+import { Star, GitFork, ExternalLink, Calendar, BookMarked, Sparkles, Loader2, Tag, CheckSquare, Square, Trash2 } from 'lucide-react';
 import { ActivityBadge } from './ActivityBadge';
 import { summarizeProject } from '../utils/ai';
 import { supabase } from '../utils/supabaseClient';
 import { useAiConfigStore } from '../store/useAiConfigStore';
 import { useDashboardStore } from '../store/useDashboardStore';
 import { getTagColor } from '../utils/colors';
+import { Collection } from '../utils/collections';
+import { CollectionPicker } from './CollectionPicker';
 
 interface ProjectCardProps {
   project: Project;
+  collections?: Collection[];
+  assignedCollections?: Collection[];
+  onToggleCollection?: (collection: Collection, shouldInclude: boolean) => Promise<void> | void;
+  showSelectionCheckbox?: boolean;
+  isSelected?: boolean;
+  onToggleSelected?: (projectId: string) => void;
+  onRemoveFromCurrentCollection?: (projectId: string) => void;
+  currentCollectionName?: string;
 }
 
-export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
+export const ProjectCard: React.FC<ProjectCardProps> = ({
+  project,
+  collections = [],
+  assignedCollections = [],
+  onToggleCollection,
+  showSelectionCheckbox = false,
+  isSelected = false,
+  onToggleSelected,
+  onRemoveFromCurrentCollection,
+  currentCollectionName
+}) => {
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [aiSummary, setAiSummary] = useState(project.ai_summary);
   const [aiTags, setAiTags] = useState<string[]>(project.ai_tags || []);
@@ -97,12 +117,29 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
       <div className="p-5 flex-1 flex flex-col">
         <div className="flex justify-between items-start mb-3">
           <div className="flex items-center space-x-2.5 truncate pr-2">
+            {showSelectionCheckbox && (
+              <button
+                type="button"
+                onClick={() => onToggleSelected?.(project.id)}
+                className="text-gray-400 hover:text-blue-600 transition-colors"
+                title={isSelected ? 'Deselect project' : 'Select project'}
+              >
+                {isSelected ? <CheckSquare className="w-4.5 h-4.5 text-blue-600" /> : <Square className="w-4.5 h-4.5" />}
+              </button>
+            )}
             <BookMarked className={`w-4.5 h-4.5 flex-shrink-0 ${isCurrentlySummarizing ? 'text-purple-500' : 'text-gray-400'}`} />
             <h3 className="text-base font-bold text-gray-900 truncate" title={project.full_name}>
               {project.name}
             </h3>
           </div>
           <div className="flex items-center space-x-1.5 flex-shrink-0">
+            {onToggleCollection && (
+              <CollectionPicker
+                collections={collections}
+                assignedCollectionIds={assignedCollections.map((collection) => collection.id)}
+                onToggleCollection={onToggleCollection}
+              />
+            )}
             <button 
               onClick={handleSummarize}
               disabled={isCurrentlySummarizing}
@@ -158,6 +195,25 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
               })}
             </div>
           )}
+
+        {assignedCollections.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            {assignedCollections.slice(0, 3).map((collection) => (
+              <span
+                key={collection.id}
+                className="inline-flex items-center rounded-md border border-blue-100 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700"
+                title={collection.description || collection.name}
+              >
+                {collection.name}
+              </span>
+            ))}
+            {assignedCollections.length > 3 && (
+              <span className="inline-flex items-center rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-500">
+                +{assignedCollections.length - 3}
+              </span>
+            )}
+          </div>
+        )}
         
         <div className={`flex flex-wrap items-center gap-3.5 text-xs font-medium text-gray-500 ${!displayTags?.length && !displaySummary && !isCurrentlySummarizing ? 'mt-auto' : ''}`}>
           {project.language && (
@@ -179,21 +235,33 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
         </div>
       </div>
       
-      <div className="px-5 py-3 bg-gray-50/50 border-t border-gray-100 flex justify-between items-center rounded-b-xl">
+      <div className="px-5 py-3 bg-gray-50/50 border-t border-gray-100 flex justify-between items-center rounded-b-xl gap-3">
         <div className="flex items-center text-xs font-medium text-gray-400" title={project.type === 'star' ? 'Starred on' : 'Forked on'}>
           <Calendar className="w-3.5 h-3.5 mr-1.5" />
           <span>{project.type === 'star' ? 'Starred' : 'Forked'} {formatDate(project.starred_at || project.github_created_at)}</span>
         </div>
-        
-        <a 
-          href={project.html_url} 
-          target="_blank" 
-          rel="noopener noreferrer"
-          className="text-gray-400 hover:text-gray-900 transition-colors p-1 hover:bg-gray-200 rounded-md"
-          title="View on GitHub"
-        >
-          <ExternalLink className="w-4 h-4" />
-        </a>
+
+        <div className="flex items-center gap-1.5">
+          {onRemoveFromCurrentCollection && (
+            <button
+              type="button"
+              onClick={() => onRemoveFromCurrentCollection(project.id)}
+              className="text-red-400 hover:text-red-600 transition-colors p-1 hover:bg-red-50 rounded-md"
+              title={currentCollectionName ? `Remove from ${currentCollectionName}` : 'Remove from current collection'}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+          <a 
+            href={project.html_url} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-gray-400 hover:text-gray-900 transition-colors p-1 hover:bg-gray-200 rounded-md"
+            title="View on GitHub"
+          >
+            <ExternalLink className="w-4 h-4" />
+          </a>
+        </div>
       </div>
     </div>
   );

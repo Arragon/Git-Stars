@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Project } from '../store/useDashboardStore';
-import { analyzeProjectActivity } from '../utils/github';
+import { analyzeProjectActivity, GitHubRateLimitError, GitHubInvalidRepoError } from '../utils/github';
 import { supabase } from '../utils/supabaseClient';
 import { Flame, TrendingUp, Moon, AlertCircle, Loader2 } from 'lucide-react';
 
@@ -12,7 +12,7 @@ export const ActivityBadge: React.FC<ActivityBadgeProps> = ({ project }) => {
   const [index, setIndex] = useState<number | null>(project.activity_index ?? null);
   const [details, setDetails] = useState(project.activity_details ?? null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<null | 'rate_limit' | 'invalid' | 'unknown'>(null);
   const badgeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,7 +41,7 @@ export const ActivityBadge: React.FC<ActivityBadgeProps> = ({ project }) => {
 
   const loadActivity = async () => {
     setLoading(true);
-    setError(false);
+    setError(null);
     try {
       const result = await analyzeProjectActivity(project.full_name);
       setIndex(result.index);
@@ -56,7 +56,19 @@ export const ActivityBadge: React.FC<ActivityBadgeProps> = ({ project }) => {
 
     } catch (err) {
       console.error('Failed to analyze activity for', project.full_name, err);
-      setError(true);
+      if (index !== null) {
+        setError(null);
+        return;
+      }
+      if (err instanceof GitHubRateLimitError) {
+        setError('rate_limit');
+        return;
+      }
+      if (err instanceof GitHubInvalidRepoError) {
+        setError('invalid');
+        return;
+      }
+      setError('unknown');
     } finally {
       setLoading(false);
     }
@@ -74,7 +86,7 @@ export const ActivityBadge: React.FC<ActivityBadgeProps> = ({ project }) => {
     if (error) {
       return {
         icon: <AlertCircle className="w-3 h-3 mr-1" />,
-        text: 'Unknown',
+        text: error === 'rate_limit' ? 'Rate limited' : error === 'invalid' ? 'Invalid repo' : 'Unknown',
         color: 'bg-gray-100 text-gray-500 border-gray-200'
       };
     }

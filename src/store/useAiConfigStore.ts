@@ -46,7 +46,10 @@ export const useAiConfigStore = create<AiConfigState>()(
       }),
       isConfigured: () => {
         const { config } = get();
-        return config.apiKey.trim().length > 0;
+        const apiKeyOk = config.apiKey.trim().length > 0;
+        const baseUrlOk = config.baseUrl.trim().length > 0;
+        const modelOk = config.model.trim().length > 0;
+        return apiKeyOk && baseUrlOk && modelOk;
       },
     }),
     {

@@ -2,8 +2,98 @@ import { supabase } from './supabaseClient';
 
 const GITHUB_API_URL = 'https://api.github.com';
 
+export class GitHubRateLimitError extends Error {
+  resetAt?: number;
+
+  constructor(message: string, resetAt?: number) {
+    super(message);
+    this.name = 'GitHubRateLimitError';
+    this.resetAt = resetAt;
+  }
+}
+
+export class GitHubInvalidRepoError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GitHubInvalidRepoError';
+  }
+}
+
+type GitHubJsonResult =
+  | {
+      ok: true;
+      status: number;
+      headers: Headers;
+      data: unknown;
+    }
+  | {
+      ok: false;
+      status?: number;
+      headers?: Headers;
+      data?: unknown;
+      error: unknown;
+    };
+
+async function fetchGitHubJson(url: string, headers: Record<string, string>): Promise<GitHubJsonResult> {
+  try {
+    const response = await fetch(url, { headers });
+    const contentType = response.headers.get('content-type') ?? '';
+    let data: unknown = null;
+    if (contentType.includes('application/json')) {
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+    } else {
+      try {
+        data = await response.text();
+      } catch {
+        data = null;
+      }
+    }
+
+    if (!response.ok) {
+      return { ok: false, status: response.status, headers: response.headers, data, error: new Error(`HTTP ${response.status}`) };
+    }
+
+    return { ok: true, status: response.status, headers: response.headers, data };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+function getRateLimitResetAt(result: GitHubJsonResult): number | undefined {
+  if (result.ok) return undefined;
+  if (result.status !== 403) return undefined;
+  const reset = result.headers?.get('x-ratelimit-reset');
+  const resetSeconds = reset ? Number(reset) : NaN;
+  return Number.isFinite(resetSeconds) ? resetSeconds * 1000 : undefined;
+}
+
+function isRateLimited(result: GitHubJsonResult): boolean {
+  if (result.ok) return false;
+  if (result.status !== 403) return false;
+  const remaining = result.headers?.get('x-ratelimit-remaining');
+  if (remaining === '0') return true;
+  const message =
+    typeof result.data === 'object' && result.data && 'message' in result.data
+      ? String((result.data as any).message)
+      : typeof result.data === 'string'
+        ? result.data
+        : '';
+  return message.toLowerCase().includes('rate limit');
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
 export async function analyzeProjectActivity(fullName: string) {
   console.log(`[GitHub API] Analyzing activity for ${fullName}`);
+  if (!fullName || fullName === 'Unknown' || !fullName.includes('/')) {
+    throw new GitHubInvalidRepoError('Invalid repository full name');
+  }
   const token = await getGithubToken();
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github.v3+json',
@@ -15,62 +105,65 @@ export async function analyzeProjectActivity(fullName: string) {
   date.setDate(date.getDate() - 30);
   const since = date.toISOString();
 
-  try {
-    const [commitsRes, issuesRes, releasesRes] = await Promise.all([
-      fetch(`${GITHUB_API_URL}/repos/${fullName}/commits?since=${since}&per_page=100`, { headers }),
-      fetch(`${GITHUB_API_URL}/repos/${fullName}/issues?since=${since}&state=all&per_page=100`, { headers }),
-      fetch(`${GITHUB_API_URL}/repos/${fullName}/releases?per_page=100`, { headers })
-    ]);
+  const [commitsResult, issuesResult, releasesResult] = await Promise.all([
+    fetchGitHubJson(`${GITHUB_API_URL}/repos/${fullName}/commits?since=${since}&per_page=100`, headers),
+    fetchGitHubJson(`${GITHUB_API_URL}/repos/${fullName}/issues?since=${since}&state=all&per_page=100`, headers),
+    fetchGitHubJson(`${GITHUB_API_URL}/repos/${fullName}/releases?per_page=100`, headers),
+  ]);
 
-    // Gracefully handle rate limits or repository not found errors
-    if (!commitsRes.ok || !issuesRes.ok || !releasesRes.ok) {
-      console.warn(`[GitHub API] Failed to fetch some data for ${fullName}.`);
-      throw new Error('Failed to fetch project activity data');
+  const results = [commitsResult, issuesResult, releasesResult];
+  const anyOk = results.some((r) => r.ok);
+  const rateLimited = results.some(isRateLimited);
+  if (!anyOk) {
+    if (rateLimited) {
+      const resetAt = Math.min(
+        ...results
+          .map(getRateLimitResetAt)
+          .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+      );
+      throw new GitHubRateLimitError('GitHub API rate limit exceeded', Number.isFinite(resetAt) ? resetAt : undefined);
     }
 
-    const [commits, issuesAndPrs, releases] = await Promise.all([
-      commitsRes.json(),
-      issuesRes.json(),
-      releasesRes.json()
-    ]);
+    const statusCodes = results.map((r) => (r.ok ? r.status : r.status)).filter((s): s is number => typeof s === 'number');
+    if (statusCodes.every((s) => s === 404)) {
+      throw new Error('Repository not found');
+    }
 
-    // Handle potential API errors (e.g., repository is empty, disabled, etc.)
-    const commitsCount = Array.isArray(commits) ? commits.length : 0;
-    const issuesAndPrsArray = Array.isArray(issuesAndPrs) ? issuesAndPrs : [];
-    const releasesArray = Array.isArray(releases) ? releases : [];
-    
-    // GitHub API returns PRs in the issues endpoint. We differentiate by checking the pull_request property
-    const prsCount = issuesAndPrsArray.filter((item: any) => item.pull_request).length;
-    const issuesCount = issuesAndPrsArray.length - prsCount;
-    
-    // Releases in last 30 days
-    const recentReleasesCount = releasesArray.filter((r: any) => new Date(r.published_at) > date).length;
-
-    // Calculate an activity index (max 100)
-    // - Commits: max 50 points (2 pts each)
-    // - PRs: max 20 points (4 pts each)
-    // - Issues: max 20 points (2 pts each)
-    // - Releases: max 10 points (10 pts each)
-    const commitScore = Math.min(commitsCount * 2, 50);
-    const prScore = Math.min(prsCount * 4, 20);
-    const issueScore = Math.min(issuesCount * 2, 20);
-    const releaseScore = Math.min(recentReleasesCount * 10, 10);
-    
-    const activityIndex = Math.min(commitScore + prScore + issueScore + releaseScore, 100);
-
-    return {
-      index: activityIndex,
-      details: {
-        commits: commitsCount,
-        issues: issuesCount,
-        prs: prsCount,
-        releases: recentReleasesCount
-      }
-    };
-  } catch (error) {
-    console.error(`[GitHub API] Error analyzing activity for ${fullName}:`, error);
-    throw error;
+    throw new Error('Failed to fetch project activity data');
   }
+
+  const commitsArray = commitsResult.ok ? asArray(commitsResult.data) : [];
+  const issuesAndPrsArray = issuesResult.ok ? asArray(issuesResult.data) : [];
+  const releasesArray = releasesResult.ok ? asArray(releasesResult.data) : [];
+
+  const commitsCount = commitsArray.length;
+  const prsCount = issuesAndPrsArray.filter((item: any) => item?.pull_request).length;
+  const issuesCount = Math.max(issuesAndPrsArray.length - prsCount, 0);
+
+  const recentReleasesCount = releasesArray.filter((r: any) => {
+    const publishedAt = r?.published_at;
+    if (!publishedAt) return false;
+    const publishedDate = new Date(publishedAt);
+    return Number.isFinite(publishedDate.getTime()) && publishedDate > date;
+  }).length;
+
+  const commitScore = Math.min(commitsCount * 2, 50);
+  const prScore = Math.min(prsCount * 4, 20);
+  const issueScore = Math.min(issuesCount * 2, 20);
+  const releaseScore = Math.min(recentReleasesCount * 10, 10);
+
+  const activityIndex = Math.min(commitScore + prScore + issueScore + releaseScore, 100);
+
+  return {
+    index: activityIndex,
+    details: {
+      commits: commitsCount,
+      issues: issuesCount,
+      prs: prsCount,
+      releases: recentReleasesCount,
+    },
+    partial: !results.every((r) => r.ok),
+  };
 }
 
 async function getGithubToken() {
@@ -467,28 +560,6 @@ export async function syncGitHubData(userId: string, githubId: string, username:
       console.error('[Sync Process] ❌ Error updating last_synced_at:', updateSyncError);
     } else {
       console.log('[Sync Process] ✅ Successfully updated last_synced_at');
-    }
-
-    // 5. Perform automatic cleanup
-    console.log('[Sync Process] Step 5: Performing automatic data cleanup...');
-    try {
-      // Clean up users inactive for 30 days
-      const { error: timeCleanupError } = await supabase.rpc('cleanup_inactive_users', { days_inactive: 30 });
-      if (timeCleanupError) {
-        console.warn('[Sync Process] Warning: Failed to run time-based cleanup:', timeCleanupError);
-      } else {
-        console.log('[Sync Process] ✅ Completed time-based cleanup');
-      }
-
-      // Clean up oldest users if we exceed 1000 users
-      const { error: capacityCleanupError } = await supabase.rpc('cleanup_old_users', { max_users: 1000 });
-      if (capacityCleanupError) {
-        console.warn('[Sync Process] Warning: Failed to run capacity-based cleanup:', capacityCleanupError);
-      } else {
-        console.log('[Sync Process] ✅ Completed capacity-based cleanup');
-      }
-    } catch (cleanupError) {
-      console.error('[Sync Process] ❌ Error during cleanup phase:', cleanupError);
     }
 
     console.log(`[Sync Process] 🎉 SYNC COMPLETED SUCCESSFULLY`);

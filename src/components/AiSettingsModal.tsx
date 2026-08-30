@@ -19,6 +19,18 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({ isOpen, onClos
 
   if (!isOpen) return null;
 
+  const apiKeyOk = apiKey.trim().length > 0;
+  const baseUrlOk = baseUrl.trim().length > 0;
+  const modelOk = model.trim().length > 0;
+  const canSave = apiKeyOk && baseUrlOk && modelOk;
+  const validationMessage = !apiKeyOk
+    ? 'API Key is required.'
+    : !baseUrlOk
+      ? 'Base URL is required.'
+      : !modelOk
+        ? 'Model is required.'
+        : '';
+
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newProvider = e.target.value as AiProvider;
     setProvider(newProvider);
@@ -39,6 +51,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({ isOpen, onClos
   };
 
   const handleSave = () => {
+    if (!canSave) return;
     setConfig({
       provider,
       apiKey,
@@ -139,13 +152,23 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({ isOpen, onClos
                   <strong>Note:</strong> API keys are stored locally in your browser and are never sent to our servers. Summaries generated will be saved to the database.
                 </p>
               </div>
+              {!canSave && (
+                <div className="bg-red-50 p-3 rounded-md">
+                  <p className="text-xs text-red-800">
+                    {validationMessage}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
           <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
             <button
               type="button"
               onClick={handleSave}
-              className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
+              disabled={!canSave}
+              className={`w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 text-base font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm ${
+                canSave ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-300 cursor-not-allowed'
+              }`}
             >
               Save Configuration
             </button>
