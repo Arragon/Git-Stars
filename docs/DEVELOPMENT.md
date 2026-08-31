@@ -16,6 +16,7 @@
 | `npm run check` | 执行 TypeScript 项目检查（`tsc -b --noEmit`） |
 | `npm run lint` | 执行 ESLint 检查 |
 | `npm run test` | 执行 Vitest 单元测试 |
+| `npm run test:db` | 使用 Supabase CLI 执行本地 pgTAP 数据库测试 |
 | `npm run build` | 执行 TypeScript 构建检查并生成生产构建产物 |
 | `npm run preview` | 预览生产构建产物 |
 
