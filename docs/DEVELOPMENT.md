@@ -46,7 +46,7 @@
 
 ## 数据库测试
 
-数据库测试使用 Supabase CLI 的 pgTAP 支持。根据本机 `npx supabase --help`、`npx supabase test --help` 和 `npx supabase db --help` 的实际输出：
+数据库测试使用 Supabase CLI 的 pgTAP 支持，需要 Docker 正在运行，且已 `npx supabase start`。仓库未安装 Supabase CLI 依赖，`npm run test:db` 需要全局 CLI；否则直接用 `npx supabase test db`。根据本机 `npx supabase --help`、`npx supabase test --help` 和 `npx supabase db --help` 的实际输出：
 
 - `npx supabase test db [flags] [<path...>]`：使用 pgTAP 测试本地数据库。
 - `npx supabase db reset [flags]`：使用本地迁移重置数据库。
@@ -82,7 +82,7 @@ npx supabase stop
 
 `npx supabase test db` 首次拉取 `pg_prove` 镜像时出现了 registry 的 `Data limit exceeded` 重试信息，随后镜像成功拉取，测试通过。
 
-`secure_rls.sql` 没有时间戳前缀，因此 `db reset` 实际跳过了它。本 milestone 不修改、重命名或删除该迁移文件；B1 处理该问题。
+`secure_rls.sql` 没有时间戳前缀，因此 `db reset` 实际跳过了它。这意味着本地重置出的数据库不包含 RLS 加固，任何 RLS 测试在 B1 修正该文件命名前都不具备实际保护验证能力。本 milestone 不修改、重命名或删除该迁移文件；B1 处理该问题。
 
 ## CI 门禁
 
