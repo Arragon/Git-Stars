@@ -45,4 +45,52 @@
 
 ## 数据库测试
 
-A3 将在此记录 Supabase CLI 的数据库测试命令、实际输出及本地运行结果。
+数据库测试使用 Supabase CLI 的 pgTAP 支持。根据本机 `npx supabase --help`、`npx supabase test --help` 和 `npx supabase db --help` 的实际输出：
+
+- `npx supabase test db [flags] [<path...>]`：使用 pgTAP 测试本地数据库。
+- `npx supabase db reset [flags]`：使用本地迁移重置数据库。
+- `npx supabase start`：启动本地 Supabase 栈。
+- `npx supabase stop`：停止本地 Supabase 栈。
+
+A3 添加的 smoke test 位于 `supabase/tests/database/000_schema_smoke.test.sql`，检查 `users`、`projects`、`user_projects` 和 `collections` 四张表。测试在事务中创建/使用 pgTAP，并在结尾回滚，不修改生产 schema。
+
+本次实际运行：
+
+```text
+npx supabase start
+退出码：0
+结果：本地 Supabase 栈启动成功。
+注意：启动时跳过了 secure_rls.sql（文件名必须匹配 "<timestamp>_name.sql"）。
+警告：未找到 supabase/seed.sql。
+
+npx supabase db reset
+退出码：0
+结果：重建数据库并成功应用 5 个带时间戳的迁移。
+注意：secure_rls.sql 仍被跳过；未找到 supabase/seed.sql。
+
+npx supabase test db
+退出码：0
+结果：All tests successful.
+Files=1, Tests=4
+Result: PASS
+
+npx supabase stop
+退出码：0
+结果：本地 Supabase 开发栈已停止。
+```
+
+`npx supabase test db` 首次拉取 `pg_prove` 镜像时出现了 registry 的 `Data limit exceeded` 重试信息，随后镜像成功拉取，测试通过。
+
+`secure_rls.sql` 没有时间戳前缀，因此 `db reset` 实际跳过了它。本 milestone 不修改、重命名或删除该迁移文件；B1 处理该问题。
+
+## CI 门禁
+
+CI 工作流依次执行：
+
+- `npm ci`
+- `npm run check`
+- `npm run lint`（当前保留 `continue-on-error: true`，待 PHASE E2 清零既有 lint error 后移除）
+- `npm test`
+- `npm run build`
+
+数据库测试暂不加入 CI，作为待办保留；后续是否加入取决于本地 Supabase 栈的可靠 CI 运行条件。

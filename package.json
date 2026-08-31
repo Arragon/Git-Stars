@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:db": "supabase test db",
     "preview": "vite preview",
     "check": "tsc -b --noEmit"
   },
