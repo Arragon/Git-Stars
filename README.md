@@ -19,6 +19,10 @@ cp .env.example .env
 npm run dev
 ```
 
+### 开发与校验
+
+更多开发环境要求、`check` / `lint` / `test` / `build` 命令和基线记录，请参阅 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+
 访问：Vite 输出的本地地址（通常是 `http://localhost:5173/`）。
 
 ## 环境变量
@@ -69,7 +73,7 @@ VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 - `projects`：仓库元信息（GitHub 公共数据）
 - `user_projects`：用户与仓库关联（star/fork + 时间）
 
-数据获取与写入的核心逻辑在 [github.ts](file:///d:/Project/GitStars/src/utils/github.ts)。
+数据获取与写入的核心逻辑在 [github.ts](src/utils/github.ts)。
 
 ## 如何获取数据（GitHub → Supabase → UI）
 
@@ -77,7 +81,7 @@ VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 
 首页点击 “Sign in with GitHub” 后，会通过 Supabase 发起 GitHub OAuth：
 
-- 登录入口：[Home.tsx](file:///d:/Project/GitStars/src/pages/Home.tsx)
+- 登录入口：[Home.tsx](src/pages/Home.tsx)
 - OAuth scopes：`read:user user:email`
 
 ### 2) 拉取 Stars / Forks
@@ -94,7 +98,7 @@ VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 - 将仓库信息 `upsert` 到 `projects`，将关联关系 `upsert` 到 `user_projects`
 - 更新 `users.last_synced_at`
 
-入口页面：[Dashboard.tsx](file:///d:/Project/GitStars/src/pages/Dashboard.tsx)
+入口页面：[Dashboard.tsx](src/pages/Dashboard.tsx)
 
 ### 3) 速率限制与失败场景
 

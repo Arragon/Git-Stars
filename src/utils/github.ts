@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { resolveSyncIdentity } from './syncIdentity';
 
 const GITHUB_API_URL = 'https://api.github.com';
 
@@ -362,17 +363,16 @@ export async function syncGitHubData(userId: string, githubId: string, username:
       .eq('github_id', String(githubId))
       .single();
 
-    if (existingUser && existingUser.id !== userId) {
-      console.log(`[Sync Process] Found existing user with same github_id but different id (${existingUser.id}). Deleting old user to recreate with new id...`);
-      // This will cascade delete user_projects for the old user, which is fine because we'll re-sync them
-      const { error: deleteError } = await supabase
-        .from('users')
-        .delete()
-        .eq('id', existingUser.id);
-        
-      if (deleteError) {
-        console.error('[Sync Process] ❌ Error deleting old user:', deleteError);
-      }
+    const identityDecision = resolveSyncIdentity({
+      githubId: String(githubId),
+      sessionUserId: userId,
+      existingUserId: existingUser?.id,
+    });
+
+    if (identityDecision.status === 'conflict') {
+      console.error('[Sync Process] ❌ Identity conflict, aborting sync:', identityDecision);
+      alert(identityDecision.message);
+      return false;
     }
 
     const { data: userData, error: userError } = await supabase
