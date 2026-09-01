@@ -29,6 +29,8 @@
 3. `secure_rls.sql` 移出 `supabase/migrations/`（归档到 `docs/archived/legacy-secure_rls.sql`）。它从未被 CLI 应用，若被手工执行会覆盖上面更严的 policy，因此不能留在迁移目录里。
 4. 同步的 identity 冲突路径改为 fail-closed（问题 5，见 B2）：不执行任何 DELETE，中止同步并返回结构化诊断。
 
+identity 冲突也可能表现为 `users.github_id` 唯一约束冲突：`users_select_own` 只允许读取当前用户自己的行，冲突行对当前 session 不可见。该路径会被转换为相同的 fail-closed 结构化冲突，且面向用户的冲突消息不包含内部用户标识符。唯一约束冲突后会结构化确认自己的 users 行是否写入，未写入即判定为 identity 冲突。检测不依赖数据库错误文案。
+
 ### 已知的、本阶段不解决的偏差
 
 问题 6 无法在 B1 完全消除：同步、AI 摘要、活跃度全部在浏览器里写共享 `projects` 行，收紧到“只能写自己 library 内的行”会让首次遇到他人已入库仓库的 upsert 失败，属于破坏现有功能。B1 的处理是**移除 DELETE 能力**（共享事实不可被客户端销毁），列级/服务端边界留给 PHASE D 的 LibraryItem 拆分与 PHASE C 的同步改造。

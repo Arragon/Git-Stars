@@ -1,7 +1,16 @@
 import { supabase } from './supabaseClient';
-import { resolveSyncIdentity } from './syncIdentity';
+import {
+  IDENTITY_CONFLICT_MESSAGE,
+  isIdentityUniqueViolation,
+  resolveSyncIdentity,
+} from './syncIdentity';
 
 const GITHUB_API_URL = 'https://api.github.com';
+
+export type SyncGitHubDataResult =
+  | { status: 'success' }
+  | { status: 'failed' }
+  | { status: 'aborted'; notified: true };
 
 export class GitHubRateLimitError extends Error {
   resetAt?: number;
@@ -344,7 +353,11 @@ export async function fetchUserForks(username: string, lastSyncedAt?: string) {
   return allForks;
 }
 
-export async function syncGitHubData(userId: string, githubId: string, username: string) {
+export async function syncGitHubData(
+  userId: string,
+  githubId: string,
+  username: string,
+): Promise<SyncGitHubDataResult> {
   console.log(`[Sync Process] ========================================`);
   console.log(`[Sync Process] STARTING GITHUB DATA SYNC FOR USER`);
   console.log(`[Sync Process] User ID: ${userId}`);
@@ -370,9 +383,13 @@ export async function syncGitHubData(userId: string, githubId: string, username:
     });
 
     if (identityDecision.status === 'conflict') {
-      console.error('[Sync Process] ❌ Identity conflict, aborting sync:', identityDecision);
+      console.error(
+        '[Sync Process] ❌ Identity conflict, aborting sync:',
+        identityDecision.code,
+        identityDecision.reason,
+      );
       alert(identityDecision.message);
-      return false;
+      return { status: 'aborted', notified: true };
     }
 
     const { data: userData, error: userError } = await supabase
@@ -390,7 +407,30 @@ export async function syncGitHubData(userId: string, githubId: string, username:
         if (userError.code === '42501') {
           alert("Database RLS Error: You don't have permission to modify the users table. Please update the Supabase Row Level Security policies.");
         }
+        if (isIdentityUniqueViolation(userError)) {
+          console.error(
+            '[Sync Process] ❌ Identity conflict, aborting sync:',
+            'IDENTITY_CONFLICT',
+            'unique_violation',
+          );
+          alert(IDENTITY_CONFLICT_MESSAGE);
+          return { status: 'aborted', notified: true };
+        }
         if (userError.code === '23505') {
+          const { data: ownRow } = await supabase
+            .from('users')
+            .select('id')
+            .eq('id', userId)
+            .maybeSingle();
+          if (!ownRow) {
+            console.error(
+              '[Sync Process] ❌ Identity conflict, aborting sync:',
+              'IDENTITY_CONFLICT',
+              'unique_violation',
+            );
+            alert(IDENTITY_CONFLICT_MESSAGE);
+            return { status: 'aborted', notified: true };
+          }
            console.log('[Sync Process] User already exists (unique constraint), continuing...');
         } else {
            // Instead of throwing and stopping everything, let's log and see if we can still insert into other tables.
@@ -404,7 +444,7 @@ export async function syncGitHubData(userId: string, githubId: string, username:
     if (!checkUser) {
       console.error('[Sync Process] ❌ Critical: User was not found in the database even after upsert attempt. Cannot proceed with foreign key relations.');
       alert('Critical Database Error: Failed to create or find your user record in the database. Please contact support or check database logs.');
-      return false; // Stop execution to prevent foreign key errors
+      return { status: 'aborted', notified: true }; // Stop execution to prevent foreign key errors
     }
     
     console.log('[Sync Process] ✅ User successfully verified/upserted in DB:', userData);
@@ -563,13 +603,13 @@ export async function syncGitHubData(userId: string, githubId: string, username:
     }
 
     console.log(`[Sync Process] 🎉 SYNC COMPLETED SUCCESSFULLY`);
-    return true;
+    return { status: 'success' };
   } catch (error) {
     console.error('[Sync Process] ❌ CRITICAL ERROR DURING SYNC:', error);
     if (error instanceof Error) {
       console.error('[Sync Process] Error Message:', error.message);
       console.error('[Sync Process] Error Stack:', error.stack);
     }
-    return false;
+    return { status: 'failed' };
   }
 }

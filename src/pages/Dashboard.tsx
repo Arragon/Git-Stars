@@ -364,12 +364,12 @@ export const Dashboard: React.FC = () => {
     const providerId = user.user_metadata?.provider_id || githubIdentity?.id || identityData.provider_id || user.id;
     const username = user.user_metadata?.preferred_username || user.user_metadata?.user_name || identityData.preferred_username || identityData.user_name || 'unknown';
 
-    const success = await syncGitHubData(user.id, providerId, username);
+    const result = await syncGitHubData(user.id, providerId, username);
 
-    if (success) {
+    if (result.status === 'success') {
       autoCollectBootstrappedRef.current = false;
       await Promise.all([loadProjects(), loadCollections()]);
-    } else if (!isAuto) {
+    } else if (result.status === 'failed' && !isAuto) {
       alert('Failed to sync GitHub data. This is likely due to GitHub API rate limits. Please try again later.');
     }
 
