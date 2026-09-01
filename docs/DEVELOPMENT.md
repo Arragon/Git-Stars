@@ -60,14 +60,14 @@ A3 添加的 smoke test 位于 `supabase/tests/database/000_schema_smoke.test.sq
 ```text
 npx supabase start
 退出码：0
-结果：本地 Supabase 栈启动成功。
-注意：启动时跳过了 secure_rls.sql（文件名必须匹配 "<timestamp>_name.sql"）。
+结果：本地 Supabase 栈启动成功（PHASE A 记录）。
+说明：纠正性安全迁移已使用时间戳版本化，并由本地 `db reset` 应用；`npx supabase test db` 会运行 RLS 回归测试套件。
 警告：未找到 supabase/seed.sql。
 
 npx supabase db reset
 退出码：0
-结果：重建数据库并成功应用 5 个带时间戳的迁移。
-注意：secure_rls.sql 仍被跳过；未找到 supabase/seed.sql。
+结果：重建数据库并成功应用带时间戳的迁移（PHASE A 记录）。
+注意：未找到 supabase/seed.sql。
 
 npx supabase test db
 退出码：0
@@ -82,7 +82,7 @@ npx supabase stop
 
 `npx supabase test db` 首次拉取 `pg_prove` 镜像时出现了 registry 的 `Data limit exceeded` 重试信息，随后镜像成功拉取，测试通过。
 
-`secure_rls.sql` 没有时间戳前缀，因此 `db reset` 实际跳过了它。这意味着本地重置出的数据库不包含 RLS 加固，任何 RLS 测试在 B1 修正该文件命名前都不具备实际保护验证能力。本 milestone 不修改、重命名或删除该迁移文件；B1 处理该问题。
+数据库测试需要 Docker，本地 Supabase 栈目前未加入 CI。
 
 ## CI 门禁
 
