@@ -60,21 +60,21 @@ select throws_ok(
     values ('55555555-5555-5555-5555-555555555555', '33333333-3333-3333-3333-333333333333')$$,
   '42501', null, 'user A cannot add projects to a collection owned by user B');
 
+with updated as (
+  update public.users set username = 'hijacked'
+  where id = '22222222-2222-2222-2222-222222222222' returning 1)
 select is(
-  (with updated as (
-     update public.users set username = 'hijacked'
-     where id = '22222222-2222-2222-2222-222222222222' returning 1)
-   select count(*)::int from updated),
+  (select count(*)::int from updated),
   0, 'user A cannot update user B''s users row');
 
 select throws_ok('delete from public.projects', '42501', null, 'authenticated cannot delete shared project facts');
 select throws_ok('delete from public.users', '42501', null, 'authenticated cannot delete users rows');
 
+with updated as (
+  update public.users set last_synced_at = now()
+  where id = '11111111-1111-1111-1111-111111111111' returning 1)
 select is(
-  (with updated as (
-     update public.users set last_synced_at = now()
-     where id = '11111111-1111-1111-1111-111111111111' returning 1)
-   select count(*)::int from updated),
+  (select count(*)::int from updated),
   1, 'user A can update its own users row');
 
 select lives_ok(
