@@ -1,5 +1,9 @@
 import { supabase } from './supabaseClient';
-import { resolveSyncIdentity } from './syncIdentity';
+import {
+  IDENTITY_CONFLICT_MESSAGE,
+  isIdentityUniqueViolation,
+  resolveSyncIdentity,
+} from './syncIdentity';
 
 const GITHUB_API_URL = 'https://api.github.com';
 
@@ -370,7 +374,11 @@ export async function syncGitHubData(userId: string, githubId: string, username:
     });
 
     if (identityDecision.status === 'conflict') {
-      console.error('[Sync Process] ❌ Identity conflict, aborting sync:', identityDecision);
+      console.error(
+        '[Sync Process] ❌ Identity conflict, aborting sync:',
+        identityDecision.code,
+        identityDecision.reason,
+      );
       alert(identityDecision.message);
       return false;
     }
@@ -389,6 +397,15 @@ export async function syncGitHubData(userId: string, githubId: string, username:
         console.error('[Sync Process] ❌ Error upserting user:', userError);
         if (userError.code === '42501') {
           alert("Database RLS Error: You don't have permission to modify the users table. Please update the Supabase Row Level Security policies.");
+        }
+        if (isIdentityUniqueViolation(userError)) {
+          console.error(
+            '[Sync Process] ❌ Identity conflict, aborting sync:',
+            'IDENTITY_CONFLICT',
+            'unique_violation',
+          );
+          alert(IDENTITY_CONFLICT_MESSAGE);
+          return false;
         }
         if (userError.code === '23505') {
            console.log('[Sync Process] User already exists (unique constraint), continuing...');
