@@ -20,6 +20,8 @@
 | `npm run build` | 执行 TypeScript 构建检查并生成生产构建产物 |
 | `npm run preview` | 预览生产构建产物 |
 
+开发服务器固定在 5173 且启用 `strictPort`，端口被占用时直接失败，以保证与 `supabase/config.toml` 的 OAuth 回调白名单一致。
+
 ## 基线记录
 
 以下结果来自本次 PHASE A 执行前实际运行。
