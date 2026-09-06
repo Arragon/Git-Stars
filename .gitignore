@@ -27,6 +27,8 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 .idea
+.qoder/
+.zion-mcp/
 .DS_Store
 *.suo
 *.ntvs*
