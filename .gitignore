@@ -29,6 +29,7 @@ dist-ssr
 .idea
 .qoder/
 .zion-mcp/
+.vercel
 .DS_Store
 *.suo
 *.ntvs*
