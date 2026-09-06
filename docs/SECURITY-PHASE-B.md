@@ -4,14 +4,14 @@
 
 ## 1. 现状（已核对全部迁移与数据库访问代码）
 
-| # | 问题 | 证据 | 严重度 |
-| - | - | - | - |
-| 1 | RLS 在 `users` / `projects` / `user_projects` 上被显式关闭，且 `anon`、`authenticated` 被授予 `ALL PRIVILEGES` | `20240101000000_init.sql` | 严重：默认部署的 anon key 可读写删全部业务数据 |
-| 2 | `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated` | `20240101000000_init.sql` 末尾 | 严重：后续新建的每张表自动继承客户端全权限（`collections`、`collection_projects` 已受影响，仅因自身启用了 RLS 才未被 anon 读取） |
-| 3 | `secure_rls.sql` 没有时间戳前缀，Supabase CLI 静默跳过 | `npx supabase db reset` 输出 `Skipping migration secure_rls.sql...` | 严重：新装与本地 reset 完全没有 RLS 加固；加固只存在于“手工执行过该文件”的实例 |
-| 4 | `cleanup_old_users()` / `cleanup_inactive_users()` 直接 `DELETE FROM users`，plpgsql 函数默认 `EXECUTE` 授予 `PUBLIC` | `20240324000000_incremental_sync_and_cleanup.sql` | 严重：任意浏览器会话可经 PostgREST rpc 调用；`users.id` 的 `ON DELETE CASCADE` 会连带删除 `user_projects` 与 `collections` |
-| 5 | 同步在 identity 冲突时删除既有用户行 | `src/utils/github.ts` 第 365-376 行 | 严重：自动销毁用户数据（含 cascade 的收藏夹），且删除失败只记日志继续执行 |
-| 6 | 浏览器直接写共享 `projects` 行（同步 upsert、AI 摘要、活跃度） | `src/utils/github.ts:466`、`src/pages/Dashboard.tsx:468`、`src/components/ProjectCard.tsx:70`、`src/components/ActivityBadge.tsx:51` | 中：任意 authenticated 用户可改任意仓库事实 |
+| #   | 问题                                                                                                                  | 证据                                                                                                                                 | 严重度                                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | RLS 在 `users` / `projects` / `user_projects` 上被显式关闭，且 `anon`、`authenticated` 被授予 `ALL PRIVILEGES`        | `20240101000000_init.sql`                                                                                                            | 严重：默认部署的 anon key 可读写删全部业务数据                                                                                   |
+| 2   | `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated`                                | `20240101000000_init.sql` 末尾                                                                                                       | 严重：后续新建的每张表自动继承客户端全权限（`collections`、`collection_projects` 已受影响，仅因自身启用了 RLS 才未被 anon 读取） |
+| 3   | `secure_rls.sql` 没有时间戳前缀，Supabase CLI 静默跳过                                                                | `npx supabase db reset` 输出 `Skipping migration secure_rls.sql...`                                                                  | 严重：新装与本地 reset 完全没有 RLS 加固；加固只存在于“手工执行过该文件”的实例                                                   |
+| 4   | `cleanup_old_users()` / `cleanup_inactive_users()` 直接 `DELETE FROM users`，plpgsql 函数默认 `EXECUTE` 授予 `PUBLIC` | `20240324000000_incremental_sync_and_cleanup.sql`                                                                                    | 严重：任意浏览器会话可经 PostgREST rpc 调用；`users.id` 的 `ON DELETE CASCADE` 会连带删除 `user_projects` 与 `collections`       |
+| 5   | 同步在 identity 冲突时删除既有用户行                                                                                  | `src/utils/github.ts` 第 365-376 行                                                                                                  | 严重：自动销毁用户数据（含 cascade 的收藏夹），且删除失败只记日志继续执行                                                        |
+| 6   | 浏览器直接写共享 `projects` 行（同步 upsert、AI 摘要、活跃度）                                                        | `src/utils/github.ts:466`、`src/pages/Dashboard.tsx:468`、`src/components/ProjectCard.tsx:70`、`src/components/ActivityBadge.tsx:51` | 中：任意 authenticated 用户可改任意仓库事实                                                                                      |
 
 `users.id` 等于 Supabase Auth 的 subject（`Dashboard.tsx` 用 `user.id` 调用 `syncGitHubData`），因此 `id = auth.uid()` 是有效的所有权谓词。
 

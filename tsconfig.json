@@ -3,11 +3,7 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": [
-      "ES2020",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -22,15 +18,11 @@
     "noFallthroughCasesInSwitch": false,
     "noUncheckedSideEffectImports": false,
     "forceConsistentCasingInFileNames": false,
+    "types": ["node"],
     "baseUrl": "./",
     "paths": {
-      "@/*": [
-        "./src/*"
-      ]
+      "@/*": ["./src/*"]
     }
   },
-  "include": [
-    "src",
-    "api"
-  ]
+  "include": ["src", "server", "api"]
 }

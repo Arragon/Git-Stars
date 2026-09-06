@@ -16,17 +16,20 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "22"
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Format check (ADR-0007 D4)
+        run: npm run format:check
+
       - name: TypeScript check
         run: npm run check
 
       - name: Lint
-        # main has 17 existing lint errors; remove this after PHASE E2 clears them.
+        # main has existing lint errors; remove this after they are cleared.
         continue-on-error: true
         run: npm run lint
 
@@ -35,3 +38,11 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+      # Known deviations from ADR-0007 D4 (documented for follow-up):
+      # - contract gate (openapi diff + adapter tests): requires server/openapi.yaml which is
+      #   not yet generated. Follow-up: generate openapi.yaml from route definitions and add
+      #   `npx openapi-diff` or similar tooling.
+      # - schema-breaking gate: requires a committed schema baseline file. Follow-up: add
+      #   schema baseline comparison (e.g., compare SQLite schema dumps between commits).
+      # These gates are tracked as known limitations in INH-319 closure.
