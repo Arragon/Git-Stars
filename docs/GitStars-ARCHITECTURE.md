@@ -913,6 +913,26 @@ user-owned
 
 Full self-hosted Supabase/Docker is an advanced deployment path, not the architecture's default optimization target.
 
+**Current implementation baseline (2024-09 update)**: The repository has migrated from Supabase to a local Node.js/Hono/SQLite backend. The default deployment is now:
+
+```text
+Single Node.js process:
+- Hono HTTP server (port 3001)
+- Serves both /api/* and static dist/ (SPA fallback)
+- SQLite database (data/gitstars.db)
+- GitHub OAuth handled server-side
+- No external database service required
+```
+
+This aligns with invariant I3 (user-owned deployment) while eliminating the Supabase cloud dependency. See `docs/LOCAL-BACKEND.md` for the new architecture details.
+
+**M0 contract update (2026-09-05):** The Linear M0 milestone froze the forward architecture in `docs/adr/` (index: `docs/adr/README.md`). Two decisions refine this section:
+
+- **Deployment profiles (ADR-0003 D5):** the authoritative service is one codebase runnable either as a local single process (SQLite + `LOCAL_DEV_USER`) or deployed to a user-owned cloud (managed DB + OAuth). "Cloud core" means the user-owned authoritative server process, not a GitStars-operated multi-tenant SaaS (consistent with section 4 non-goals). Local deployment is a first-class, permanent profile, not a dev-only fallback.
+- **v1 client = Web only (ADR-0008):** desktop/mobile are frozen at contract level and explicitly deferred.
+
+Entity naming was also reconciled to the Linear plan (ADR-0003 D1): `Repository`->`RepositoryRef` (`repositories`), `LibraryItem`->`SavedRepository` (`saved_repositories`), `ProviderConnection`->`ProviderAccount` (`provider_accounts`), `Collection`->`List` (`lists`/`list_items`). Migration from the current legacy schema is additive (section 33).
+
 ---
 
 ## 32. Version compatibility
@@ -1054,6 +1074,7 @@ Tests protect invariants, not arbitrary coverage metrics.
 Highest priority:
 
 ### Database/security
+
 - RLS ownership
 - anon denial where expected
 - no cross-user writes
@@ -1061,6 +1082,7 @@ Highest priority:
 - migrations reset successfully
 
 ### Sync
+
 - partial DB failure does not advance cursor
 - retry is idempotent
 - remote unstar marks membership inactive
@@ -1068,12 +1090,14 @@ Highest priority:
 - identity conflict never deletes user data
 
 ### Provider
+
 - repository normalization
 - pagination
 - rate-limit/error normalization
 - provider contract tests after GitLab exists
 
 ### List
+
 - malformed JSON
 - oversized input
 - private repo exclusion

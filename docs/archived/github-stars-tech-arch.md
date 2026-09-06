@@ -5,11 +5,11 @@ graph TD
   A[用户浏览器] --> B[React前端应用]
   B --> C[GitHub API]
   B --> D[Supabase服务]
-  
+
   subgraph "前端层"
     B
   end
-  
+
   subgraph "外部服务"
     C
     D
@@ -22,7 +22,7 @@ graph TD
 - **初始化工具**: vite-init
 - **认证服务**: Supabase Auth (集成GitHub OAuth)
 - **数据存储**: Supabase Database (PostgreSQL)
-- **核心依赖**: 
+- **核心依赖**:
   - @supabase/supabase-js (Supabase客户端)
   - react-router-dom (路由管理)
   - axios (HTTP请求)
@@ -31,12 +31,12 @@ graph TD
 
 ## 3. 路由定义
 
-| 路由 | 用途 |
-|-------|---------|
-| / | 首页，展示产品介绍和GitHub登录入口 |
-| /dashboard | 仪表板，展示用户star/fork数据总览和项目列表 |
-| /project/:id | 项目详情页，展示具体项目的详细信息和统计图表 |
-| /auth/callback | GitHub OAuth回调处理页面 |
+| 路由           | 用途                                         |
+| -------------- | -------------------------------------------- |
+| /              | 首页，展示产品介绍和GitHub登录入口           |
+| /dashboard     | 仪表板，展示用户star/fork数据总览和项目列表  |
+| /project/:id   | 项目详情页，展示具体项目的详细信息和统计图表 |
+| /auth/callback | GitHub OAuth回调处理页面                     |
 
 ## 4. 数据模型
 
@@ -46,7 +46,7 @@ graph TD
 erDiagram
   USER ||--o{ USER_PROJECT : "拥有"
   PROJECT ||--o{ USER_PROJECT : "被收藏"
-  
+
   USER {
     uuid id PK
     string github_id
@@ -56,7 +56,7 @@ erDiagram
     timestamp created_at
     timestamp updated_at
   }
-  
+
   PROJECT {
     uuid id PK
     string github_id
@@ -72,7 +72,7 @@ erDiagram
     timestamp created_at
     timestamp updated_at
   }
-  
+
   USER_PROJECT {
     uuid id PK
     uuid user_id FK
@@ -86,6 +86,7 @@ erDiagram
 ### 4.2 数据定义语言
 
 用户表 (users)
+
 ```sql
 -- 创建用户表
 CREATE TABLE users (
@@ -103,6 +104,7 @@ CREATE INDEX idx_users_github_id ON users(github_id);
 ```
 
 项目表 (projects)
+
 ```sql
 -- 创建项目表
 CREATE TABLE projects (
@@ -128,6 +130,7 @@ CREATE INDEX idx_projects_stars_count ON projects(stars_count DESC);
 ```
 
 用户项目关联表 (user_projects)
+
 ```sql
 -- 创建用户项目关联表
 CREATE TABLE user_projects (
@@ -147,6 +150,7 @@ CREATE INDEX idx_user_projects_type ON user_projects(type);
 ```
 
 ### 4.3 权限设置
+
 ```sql
 -- 基本访问权限
 GRANT SELECT ON users TO anon;
@@ -162,6 +166,7 @@ GRANT ALL PRIVILEGES ON user_projects TO authenticated;
 ## 5. API集成
 
 ### 5.1 GitHub API集成
+
 - **用户认证**: 使用GitHub OAuth获取访问令牌
 - **获取用户star项目**: GET /user/starred
 - **获取用户fork项目**: GET /user/repos?type=forks
@@ -169,6 +174,7 @@ GRANT ALL PRIVILEGES ON user_projects TO authenticated;
 - **速率限制**: 每小时5000次请求（认证用户）
 
 ### 5.2 数据处理流程
+
 1. 用户首次登录时，批量获取所有star/fork数据
 2. 数据经过去重、格式化后存储到Supabase
 3. 后续访问优先从本地数据库读取，减少API调用
@@ -177,12 +183,14 @@ GRANT ALL PRIVILEGES ON user_projects TO authenticated;
 ## 6. 性能优化
 
 ### 6.1 前端优化
+
 - 使用React.lazy实现代码分割
 - 虚拟滚动技术处理大量项目列表
 - 图片懒加载和缓存策略
 - 使用React.memo减少不必要的重渲染
 
 ### 6.2 数据优化
+
 - 分页加载，每页显示20-50个项目
 - 本地缓存常用数据（localStorage）
 - 增量更新机制，只同步变更的数据
