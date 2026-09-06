@@ -8,22 +8,33 @@ import { RefreshCw, XCircle, Loader2 } from "lucide-react";
 
 const entityLabel = (entity: string): string => {
   switch (entity) {
-    case "saved_repository": return "Repository";
-    case "list": return "List";
-    case "list_item": return "List Item";
-    case "tag": return "Tag";
-    case "repository_tag": return "Tag Link";
-    case "preference": return "Preference";
-    default: return entity;
+    case "saved_repository":
+      return "Repository";
+    case "list":
+      return "List";
+    case "list_item":
+      return "List Item";
+    case "tag":
+      return "Tag";
+    case "repository_tag":
+      return "Tag Link";
+    case "preference":
+      return "Preference";
+    default:
+      return entity;
   }
 };
 
 const opLabel = (op: string): string => {
   switch (op) {
-    case "create": return "Create";
-    case "update": return "Update";
-    case "delete": return "Delete";
-    default: return op;
+    case "create":
+      return "Create";
+    case "update":
+      return "Update";
+    case "delete":
+      return "Delete";
+    default:
+      return op;
   }
 };
 

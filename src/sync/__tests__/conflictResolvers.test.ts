@@ -33,7 +33,12 @@ describe("Conflict Resolvers — 10 two-client scenarios", () => {
   // Scenario 1: SavedRepository — A edits note, B edits note → one 200, one 409 → resolver re-applies
   it("1. SavedRepository: A edits note, B edits note → resolver re-applies B's note onto server current", () => {
     // Server current after A's edit succeeded.
-    const serverCurrent = { id: "sr-1", note: "A's note", status: "saved", version: 2 };
+    const serverCurrent = {
+      id: "sr-1",
+      note: "A's note",
+      status: "saved",
+      version: 2,
+    };
     // B's pending mutation (based on version 1).
     const bMutation = makeMutation({
       entity: "saved_repository",
@@ -53,7 +58,12 @@ describe("Conflict Resolvers — 10 two-client scenarios", () => {
   // Scenario 2: SavedRepository — A edits status, B edits note → both converge
   it("2. SavedRepository: A edits status, B edits note → both converge via field-level merge", () => {
     // Server after A changed status.
-    const serverCurrent = { id: "sr-1", note: "original", status: "archived", version: 2 };
+    const serverCurrent = {
+      id: "sr-1",
+      note: "original",
+      status: "archived",
+      version: 2,
+    };
     // B changed note (based on version 1).
     const bMutation = makeMutation({
       entity: "saved_repository",
@@ -74,7 +84,12 @@ describe("Conflict Resolvers — 10 two-client scenarios", () => {
 
   // Scenario 3: List — A renames, B renames → one 200, one 409
   it("3. List: A renames, B renames → resolver re-applies B's name", () => {
-    const serverCurrent = { id: "l-1", name: "A's name", description: "", version: 2 };
+    const serverCurrent = {
+      id: "l-1",
+      name: "A's name",
+      description: "",
+      version: 2,
+    };
     const bMutation = makeMutation({
       entity: "list",
       entityId: "l-1",
@@ -157,7 +172,11 @@ describe("Conflict Resolvers — 10 two-client scenarios", () => {
     const result = resolveListItemOrder(bMutation, serverCurrent);
     expect(result.action).toBe("retry");
     if (result.action === "retry") {
-      expect((result.payload as Record<string, unknown>).reorder).toEqual(["Z", "X", "Y"]);
+      expect((result.payload as Record<string, unknown>).reorder).toEqual([
+        "Z",
+        "X",
+        "Y",
+      ]);
       expect(result.newBaseVersion).toBe(2);
     }
   });
@@ -250,7 +269,9 @@ describe("resolveConflict dispatcher", () => {
   });
 
   it("returns manual for unknown entity types", () => {
-    const mutation = makeMutation({ entity: "unknown_thing" as "saved_repository" });
+    const mutation = makeMutation({
+      entity: "unknown_thing" as "saved_repository",
+    });
     const result = resolveConflict("unknown_thing", mutation, {});
     expect(result.action).toBe("manual");
   });

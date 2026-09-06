@@ -430,10 +430,7 @@ function migrationV1(db: DatabaseSync): void {
 
 function migrationV2(db: DatabaseSync): void {
   // Idempotent: check if position_key column already exists.
-  const cols = all<{ name: string }>(
-    db,
-    "PRAGMA table_info('list_items')",
-  );
+  const cols = all<{ name: string }>(db, "PRAGMA table_info('list_items')");
   if (cols.some((c) => c.name === "position_key")) return;
 
   db.exec(
@@ -453,9 +450,10 @@ function migrationV2(db: DatabaseSync): void {
     const n = rows.length;
     for (let i = 0; i < n; i++) {
       const key = generateKeyForIndex(i);
-      db.prepare(
-        "UPDATE list_items SET position_key = ? WHERE id = ?",
-      ).run(key, rows[i].id);
+      db.prepare("UPDATE list_items SET position_key = ? WHERE id = ?").run(
+        key,
+        rows[i].id,
+      );
     }
   }
 
@@ -470,9 +468,26 @@ function migrationV2(db: DatabaseSync): void {
 function generateKeyForIndex(i: number): string {
   // First 20 items get single letters with spacing of ~1.3 letters apart.
   const spacedLetters = [
-    "a", "d", "g", "j", "m", "p", "s", "v", "y",
-    "ac", "af", "ai", "al", "ao", "ar", "au", "ax",
-    "ba", "bd", "bg",
+    "a",
+    "d",
+    "g",
+    "j",
+    "m",
+    "p",
+    "s",
+    "v",
+    "y",
+    "ac",
+    "af",
+    "ai",
+    "al",
+    "ao",
+    "ar",
+    "au",
+    "ax",
+    "ba",
+    "bd",
+    "bg",
   ];
   if (i < spacedLetters.length) return spacedLetters[i];
   // Beyond 20: append fractional suffix to last.

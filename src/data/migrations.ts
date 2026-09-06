@@ -56,9 +56,13 @@ export const CLIENT_MIGRATIONS: ClientMigration[] = [
       const items = db.createObjectStore("listItems" as StoreName, {
         keyPath: "id",
       });
-      items.createIndex("listPosition", ["listId", "position"] as unknown as string, {
-        unique: false,
-      });
+      items.createIndex(
+        "listPosition",
+        ["listId", "position"] as unknown as string,
+        {
+          unique: false,
+        },
+      );
       items.createIndex("savedRepositoryId", "savedRepositoryId", {
         unique: false,
       });

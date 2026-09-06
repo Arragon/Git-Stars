@@ -156,7 +156,9 @@ listRoutes.get("/:id", (c) => {
   const list = loadOwnedList(id, userId);
   if (!list) return apiError(c, 404, "NOT_FOUND", "List not found");
   const items = getDb()
-    .prepare(`${SELECT_ITEMS} WHERE li.list_id = ? ORDER BY li.position_key ASC, li.position ASC`)
+    .prepare(
+      `${SELECT_ITEMS} WHERE li.list_id = ? ORDER BY li.position_key ASC, li.position ASC`,
+    )
     .all(id) as unknown as ItemRow[];
   return c.json({
     ...serializeList(list, items.length),
@@ -337,12 +339,12 @@ listRoutes.put("/:id/items", async (c) => {
 
         // Find neighbors in the desired order among current items.
         // Items not in reorder list keep their relative position.
-        const prevKey = i > 0
-          ? keyBySavedId.get(reorder[i - 1]) ?? null
-          : null;
-        const nextKey = i < reorder.length - 1
-          ? keyBySavedId.get(reorder[i + 1]) ?? null
-          : null;
+        const prevKey =
+          i > 0 ? (keyBySavedId.get(reorder[i - 1]) ?? null) : null;
+        const nextKey =
+          i < reorder.length - 1
+            ? (keyBySavedId.get(reorder[i + 1]) ?? null)
+            : null;
 
         const newKey = generateBetween(prevKey, nextKey);
         const nextVersion = Number(item.version) + 1;
@@ -366,7 +368,9 @@ listRoutes.put("/:id/items", async (c) => {
   });
 
   const items = db
-    .prepare(`${SELECT_ITEMS} WHERE li.list_id = ? ORDER BY li.position_key ASC, li.position ASC`)
+    .prepare(
+      `${SELECT_ITEMS} WHERE li.list_id = ? ORDER BY li.position_key ASC, li.position ASC`,
+    )
     .all(id) as unknown as ItemRow[];
   const fresh = db
     .prepare("SELECT * FROM lists WHERE id = ?")

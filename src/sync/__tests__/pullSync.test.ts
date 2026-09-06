@@ -4,11 +4,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { LocalStore } from "../../data/LocalStore";
 import { InMemoryDriver } from "../../data/driver/InMemoryDriver";
-import {
-  createPullSync,
-  StaleClientError,
-  type PullStatus,
-} from "../pullSync";
+import { createPullSync, StaleClientError, type PullStatus } from "../pullSync";
 import type { ChangeFeedResponse, ChangeEntry } from "../../utils/gitstarsApi";
 
 // --- Helpers ---
@@ -168,9 +164,7 @@ describe("pullSync", () => {
     await ps1.bootstrap();
 
     // Incremental pull with new changes.
-    const batch2 = [
-      makeChange(3, "tag", "t3", "created", { name: "gamma" }),
-    ];
+    const batch2 = [makeChange(3, "tag", "t3", "created", { name: "gamma" })];
     const api2 = mockApiClient([feed(batch2)]);
     const ps2 = createPullSync({ localStore: store, apiClient: api2 });
     const result = await ps2.pullIncremental();
@@ -198,15 +192,29 @@ describe("pullSync", () => {
     let txCallCount = 0;
     const origDriver = (store as unknown as { driver: InMemoryDriver }).driver;
     const origTx = origDriver.transaction.bind(origDriver);
-    origDriver.transaction = (async (names: unknown, mode: unknown, fn: (tx: unknown) => Promise<unknown>) => {
+    origDriver.transaction = (async (
+      names: unknown,
+      mode: unknown,
+      fn: (tx: unknown) => Promise<unknown>,
+    ) => {
       txCallCount++;
       if (txCallCount === 1) {
-        return origTx(names as string[], mode as "readonly" | "readwrite", async (tx: unknown) => {
-          await fn(tx);
-          throw new Error("CRASH mid-batch");
-        });
+        return origTx(
+          names as string[],
+          mode as "readonly" | "readwrite",
+          async (tx: unknown) => {
+            await fn(tx);
+            throw new Error("CRASH mid-batch");
+          },
+        );
       }
-      return origTx(names as string[], mode as "readonly" | "readwrite", fn as (tx: import("../../data/types").TransactionContext) => Promise<unknown>);
+      return origTx(
+        names as string[],
+        mode as "readonly" | "readwrite",
+        fn as (
+          tx: import("../../data/types").TransactionContext,
+        ) => Promise<unknown>,
+      );
     }) as typeof origDriver.transaction;
 
     const api = mockApiClient([feed(changes)]);
@@ -298,7 +306,9 @@ describe("pullSync", () => {
 
   // 5. 426 STALE_CLIENT
   it("426 STALE_CLIENT → stops sync, throws StaleClientError", async () => {
-    const staleError = Object.assign(new Error("Stale client"), { status: 426 });
+    const staleError = Object.assign(new Error("Stale client"), {
+      status: 426,
+    });
     const api = mockApiClient([], { failAtIndex: 0, error: staleError });
     const ps = createPullSync({ localStore: store, apiClient: api });
 
@@ -340,9 +350,7 @@ describe("pullSync", () => {
     expect(tags).toHaveLength(2);
 
     // Next pull resumes from cursor=2.
-    const batch3 = [
-      makeChange(3, "tag", "t3", "created", { name: "third" }),
-    ];
+    const batch3 = [makeChange(3, "tag", "t3", "created", { name: "third" })];
     const api2 = mockApiClient([feed(batch3)]);
     const ps2 = createPullSync({ localStore: store, apiClient: api2 });
     const result = await ps2.pullIncremental();
@@ -451,9 +459,7 @@ describe("pullSync", () => {
     expect(api1.getChanges).toHaveBeenCalledWith(0, expect.any(Number));
 
     // Second call: cursor exists → incremental.
-    const batch2 = [
-      makeChange(3, "tag", "t3", "created", { name: "third" }),
-    ];
+    const batch2 = [makeChange(3, "tag", "t3", "created", { name: "third" })];
     const api2 = mockApiClient([feed(batch2)]);
     const ps2 = createPullSync({ localStore: store, apiClient: api2 });
     const r2 = await ps2.sync();
@@ -467,9 +473,7 @@ describe("pullSync", () => {
       makeChange(1, "tag", "t1", "created", { name: "p1a" }),
       makeChange(2, "tag", "t2", "created", { name: "p1b" }),
     ];
-    const page2 = [
-      makeChange(3, "tag", "t3", "created", { name: "p2a" }),
-    ];
+    const page2 = [makeChange(3, "tag", "t3", "created", { name: "p2a" })];
 
     let callCount = 0;
     const api = {

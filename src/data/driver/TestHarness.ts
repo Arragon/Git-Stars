@@ -4,7 +4,10 @@
 import { LocalStore } from "../LocalStore";
 import { InMemoryDriver } from "./InMemoryDriver";
 import { createFakeClock, type Clock } from "./FakeClock";
-import { createDeterministicIdGenerator, type IdGenerator } from "./FakeIdGenerator";
+import {
+  createDeterministicIdGenerator,
+  type IdGenerator,
+} from "./FakeIdGenerator";
 import { createFaultInjector, type FaultInjector } from "./NetworkFaultDriver";
 
 export interface TestClient {

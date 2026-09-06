@@ -2,7 +2,10 @@
 // Verify NetworkFaultDriver: offline, timeout, dropAck, latency all work correctly.
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { createFaultInjector, type FaultInjector } from "../driver/NetworkFaultDriver";
+import {
+  createFaultInjector,
+  type FaultInjector,
+} from "../driver/NetworkFaultDriver";
 
 /** A minimal fetch stub that always returns 200 OK. */
 const okFetch: typeof fetch = async () =>

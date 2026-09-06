@@ -8,7 +8,10 @@ export { LocalStore } from "./LocalStore";
 export { IndexedDBDriver } from "./driver/IndexedDBDriver";
 export { InMemoryDriver } from "./driver/InMemoryDriver";
 export { createFaultInjector } from "./driver/NetworkFaultDriver";
-export type { FaultInjector, NetworkFaultConfig } from "./driver/NetworkFaultDriver";
+export type {
+  FaultInjector,
+  NetworkFaultConfig,
+} from "./driver/NetworkFaultDriver";
 export { createFakeClock } from "./driver/FakeClock";
 export type { Clock } from "./driver/FakeClock";
 export { createDeterministicIdGenerator } from "./driver/FakeIdGenerator";

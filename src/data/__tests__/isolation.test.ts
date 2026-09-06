@@ -2,7 +2,12 @@
 // Tests for cache/user-state isolation (ADR-0003 D4).
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import type { LocalStoreDriver, CachedRepository, CachedSavedRepository, CachedList } from "../types";
+import type {
+  LocalStoreDriver,
+  CachedRepository,
+  CachedSavedRepository,
+  CachedList,
+} from "../types";
 import { InMemoryDriver } from "../driver/InMemoryDriver";
 import { IndexedDBDriver } from "../driver/IndexedDBDriver";
 
@@ -47,7 +52,10 @@ function makeList(id: string): CachedList {
   };
 }
 
-function runIsolationSuite(driverName: string, createDriver: () => LocalStoreDriver) {
+function runIsolationSuite(
+  driverName: string,
+  createDriver: () => LocalStoreDriver,
+) {
   describe(`isolation: ${driverName}`, () => {
     let driver: LocalStoreDriver;
 

@@ -6,13 +6,19 @@ import type { LocalStoreDriver, QueuedMutation } from "../data/types";
 
 export interface MutationQueue {
   enqueue(
-    mutation: Omit<QueuedMutation, "id" | "createdAt" | "retryCount" | "status">,
+    mutation: Omit<
+      QueuedMutation,
+      "id" | "createdAt" | "retryCount" | "status"
+    >,
   ): Promise<string>;
   getPending(): Promise<QueuedMutation[]>;
   complete(id: string): Promise<void>;
   markFailed(id: string, error: string): Promise<void>;
   quarantine(id: string, reason: string): Promise<void>;
-  updateMutation(id: string, updates: Partial<Pick<QueuedMutation, "payload" | "baseVersion">>): Promise<void>;
+  updateMutation(
+    id: string,
+    updates: Partial<Pick<QueuedMutation, "payload" | "baseVersion">>,
+  ): Promise<void>;
   clear(): Promise<void>;
 }
 

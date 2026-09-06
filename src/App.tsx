@@ -7,21 +7,33 @@ import { ProjectDetail } from "./pages/ProjectDetail";
 import { Library } from "./pages/Library";
 import { RepositoryView } from "./pages/RepositoryView";
 import { Lists } from "./pages/Lists";
-import { useSyncStatusStore, startSyncStatusPolling, stopSyncStatusPolling } from "./store/useSyncStatusStore";
+import {
+  useSyncStatusStore,
+  startSyncStatusPolling,
+  stopSyncStatusPolling,
+} from "./store/useSyncStatusStore";
 import { pullSync, pushReplay } from "./sync/syncClient";
 import { localStore } from "./data";
 
-const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const SyncProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const setOnline = useSyncStatusStore((s) => s.setOnline);
 
   useEffect(() => {
     // Initialize IndexedDB on mount
-    localStore.open().then(() => localStore.migrate()).catch(console.error);
+    localStore
+      .open()
+      .then(() => localStore.migrate())
+      .catch(console.error);
 
     const handleOnline = () => {
       setOnline(true);
       // On reconnect: trigger pull sync + push replay
-      pullSync.sync().then(() => pushReplay.replayAll()).catch(console.error);
+      pullSync
+        .sync()
+        .then(() => pushReplay.replayAll())
+        .catch(console.error);
     };
     const handleOffline = () => {
       setOnline(false);

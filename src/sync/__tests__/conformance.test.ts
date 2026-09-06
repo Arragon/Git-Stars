@@ -15,7 +15,11 @@ import { createFakeClock } from "../../data/driver/FakeClock";
 import { createDeterministicIdGenerator } from "../../data/driver/FakeIdGenerator";
 
 import { createPullSync, StaleClientError } from "../pullSync";
-import { createPushReplay, type MutationResponse, type ApiClient } from "../pushReplay";
+import {
+  createPushReplay,
+  type MutationResponse,
+  type ApiClient,
+} from "../pushReplay";
 import { createMutationQueue, type MutationQueue } from "../mutationQueue";
 import { createConflictLog, type ConflictLog } from "../conflictLog";
 import type { ChangeEntry, ChangeFeedResponse } from "../../utils/gitstarsApi";
@@ -52,9 +56,7 @@ class MockServer {
       throw Object.assign(new Error("Stale client"), { status: 426 });
     }
 
-    const changes = this.changeLog
-      .filter((c) => c.seq > since)
-      .slice(0, limit);
+    const changes = this.changeLog.filter((c) => c.seq > since).slice(0, limit);
 
     return {
       changes,
@@ -85,12 +87,9 @@ class MockServer {
 
     // Version guard.
     if (currentVersion !== ifMatchVersion) {
-      const err = new ApiError(
-        "VERSION_CONFLICT",
-        "VERSION_CONFLICT",
-        409,
-        { current: { ...current?.data, version: currentVersion } },
-      );
+      const err = new ApiError("VERSION_CONFLICT", "VERSION_CONFLICT", 409, {
+        current: { ...current?.data, version: currentVersion },
+      });
       throw err;
     }
 
@@ -99,19 +98,41 @@ class MockServer {
 
     if (isDelete) {
       const tombstone: ServerEntity = {
-        data: { ...current?.data, ...payload, deletedAt: new Date().toISOString(), _op: undefined },
+        data: {
+          ...current?.data,
+          ...payload,
+          deletedAt: new Date().toISOString(),
+          _op: undefined,
+        },
         version: newVersion,
         deleted: true,
       };
       this.entities.set(key, tombstone);
-      this.appendChange(entity, entityId, "deleted", newVersion, tombstone.data);
+      this.appendChange(
+        entity,
+        entityId,
+        "deleted",
+        newVersion,
+        tombstone.data,
+      );
     } else {
       const updated: ServerEntity = {
-        data: { ...(current?.data ?? {}), ...payload, version: newVersion, _op: undefined },
+        data: {
+          ...(current?.data ?? {}),
+          ...payload,
+          version: newVersion,
+          _op: undefined,
+        },
         version: newVersion,
       };
       this.entities.set(key, updated);
-      this.appendChange(entity, entityId, current ? "updated" : "created", newVersion, updated.data);
+      this.appendChange(
+        entity,
+        entityId,
+        current ? "updated" : "created",
+        newVersion,
+        updated.data,
+      );
     }
 
     const etag = `"${entityId}:${newVersion}"`;
@@ -138,7 +159,13 @@ class MockServer {
         return { committed, failed: true };
       }
       const m = mutations[i];
-      this.applyMutation(m.idempotencyKey, m.entity, m.entityId, m.payload, m.ifMatchVersion);
+      this.applyMutation(
+        m.idempotencyKey,
+        m.entity,
+        m.entityId,
+        m.payload,
+        m.ifMatchVersion,
+      );
       committed++;
     }
     return { committed, failed: false };
@@ -179,7 +206,10 @@ class MockServer {
 
 function createPullApiClient(server: MockServer) {
   return {
-    getChanges: async (since: number, limit?: number): Promise<ChangeFeedResponse> => {
+    getChanges: async (
+      since: number,
+      limit?: number,
+    ): Promise<ChangeFeedResponse> => {
       return server.getChanges(since, limit);
     },
   };
@@ -187,7 +217,9 @@ function createPullApiClient(server: MockServer) {
 
 function createPushApiClient(server: MockServer): ApiClient {
   return {
-    sendMutation: async (mutation: QueuedMutation): Promise<MutationResponse> => {
+    sendMutation: async (
+      mutation: QueuedMutation,
+    ): Promise<MutationResponse> => {
       return server.applyMutation(
         mutation.id,
         mutation.entity,
@@ -230,9 +262,17 @@ describe("ADR-0004 D8 — Sync Conformance Cases", () => {
   // --- Case 1: Idempotent replay ---
   it("Case 1: Same Idempotency-Key sent twice → single server-side effect", async () => {
     // Seed a saved_repository on the server.
-    server.applyMutation("seed-1", "saved_repository", "sr1", {
-      repositoryId: "r1", status: "saved", note: "original",
-    }, 0);
+    server.applyMutation(
+      "seed-1",
+      "saved_repository",
+      "sr1",
+      {
+        repositoryId: "r1",
+        status: "saved",
+        note: "original",
+      },
+      0,
+    );
 
     const initialVersion = server.entities.get("saved_repository:sr1")!.version;
 
@@ -273,9 +313,17 @@ describe("ADR-0004 D8 — Sync Conformance Cases", () => {
   // --- Case 2: Offline delete then reconnect ---
   it("Case 2: Offline delete then reconnect → tombstone observed", async () => {
     // Seed entity on server.
-    server.applyMutation("seed", "saved_repository", "sr1", {
-      repositoryId: "r1", status: "saved", note: "to-delete",
-    }, 0);
+    server.applyMutation(
+      "seed",
+      "saved_repository",
+      "sr1",
+      {
+        repositoryId: "r1",
+        status: "saved",
+        note: "to-delete",
+      },
+      0,
+    );
 
     // Setup client with mutation queue.
     const { store, mutationQueue } = await setupClient("offline-del");
@@ -337,9 +385,17 @@ describe("ADR-0004 D8 — Sync Conformance Cases", () => {
   // --- Case 3: Two clients concurrently edit Note ---
   it("Case 3: Two clients concurrently edit Note → deterministic resolution", async () => {
     // Seed on server.
-    server.applyMutation("seed", "saved_repository", "sr1", {
-      repositoryId: "r1", status: "saved", note: "original",
-    }, 0);
+    server.applyMutation(
+      "seed",
+      "saved_repository",
+      "sr1",
+      {
+        repositoryId: "r1",
+        status: "saved",
+        note: "original",
+      },
+      0,
+    );
 
     // Setup Client A and B.
     const setupA = await setupClient("A");
@@ -347,8 +403,14 @@ describe("ADR-0004 D8 — Sync Conformance Cases", () => {
 
     // Both clients pull initial state.
     const pullApi = createPullApiClient(server);
-    await createPullSync({ localStore: setupA.store, apiClient: pullApi }).bootstrap();
-    await createPullSync({ localStore: setupB.store, apiClient: pullApi }).bootstrap();
+    await createPullSync({
+      localStore: setupA.store,
+      apiClient: pullApi,
+    }).bootstrap();
+    await createPullSync({
+      localStore: setupB.store,
+      apiClient: pullApi,
+    }).bootstrap();
 
     // Client A edits note.
     await setupA.mutationQueue.enqueue({
@@ -403,18 +465,49 @@ describe("ADR-0004 D8 — Sync Conformance Cases", () => {
   // --- Case 4: Two clients concurrently reorder List ---
   it("Case 4: Two clients concurrently reorder List → deterministic merge", async () => {
     // Seed list and items on server.
-    server.applyMutation("seed-list", "list", "l1", {
-      name: "My List", description: "",
-    }, 0);
-    server.applyMutation("seed-item-x", "list_item", "li-x", {
-      listId: "l1", savedRepositoryId: "X", position: "a",
-    }, 0);
-    server.applyMutation("seed-item-y", "list_item", "li-y", {
-      listId: "l1", savedRepositoryId: "Y", position: "b",
-    }, 0);
-    server.applyMutation("seed-item-z", "list_item", "li-z", {
-      listId: "l1", savedRepositoryId: "Z", position: "c",
-    }, 0);
+    server.applyMutation(
+      "seed-list",
+      "list",
+      "l1",
+      {
+        name: "My List",
+        description: "",
+      },
+      0,
+    );
+    server.applyMutation(
+      "seed-item-x",
+      "list_item",
+      "li-x",
+      {
+        listId: "l1",
+        savedRepositoryId: "X",
+        position: "a",
+      },
+      0,
+    );
+    server.applyMutation(
+      "seed-item-y",
+      "list_item",
+      "li-y",
+      {
+        listId: "l1",
+        savedRepositoryId: "Y",
+        position: "b",
+      },
+      0,
+    );
+    server.applyMutation(
+      "seed-item-z",
+      "list_item",
+      "li-z",
+      {
+        listId: "l1",
+        savedRepositoryId: "Z",
+        position: "c",
+      },
+      0,
+    );
 
     // Setup clients.
     const setupA = await setupClient("reorder-A");
@@ -422,8 +515,14 @@ describe("ADR-0004 D8 — Sync Conformance Cases", () => {
 
     // Both pull.
     const pullApi = createPullApiClient(server);
-    await createPullSync({ localStore: setupA.store, apiClient: pullApi }).bootstrap();
-    await createPullSync({ localStore: setupB.store, apiClient: pullApi }).bootstrap();
+    await createPullSync({
+      localStore: setupA.store,
+      apiClient: pullApi,
+    }).bootstrap();
+    await createPullSync({
+      localStore: setupB.store,
+      apiClient: pullApi,
+    }).bootstrap();
 
     // Client A reorders [X,Y,Z] → [Z,X,Y].
     await setupA.mutationQueue.enqueue({
@@ -569,7 +668,13 @@ describe("Crash Recovery", () => {
   it("Crash during pull → cursor at last committed batch, re-pull applies remaining", async () => {
     // Seed 10 changes on the server.
     for (let i = 0; i < 10; i++) {
-      server.applyMutation(`seed-${i}`, "tag", `t${i}`, { name: `tag-${i}` }, 0);
+      server.applyMutation(
+        `seed-${i}`,
+        "tag",
+        `t${i}`,
+        { name: `tag-${i}` },
+        0,
+      );
     }
 
     const driver = new InMemoryDriver();
@@ -583,7 +688,9 @@ describe("Crash Recovery", () => {
     driver.transaction = (async (
       names: string[],
       mode: "readonly" | "readwrite",
-      fn: (tx: import("../../data/types").TransactionContext) => Promise<unknown>,
+      fn: (
+        tx: import("../../data/types").TransactionContext,
+      ) => Promise<unknown>,
     ) => {
       txCount++;
       if (txCount === 1) {
@@ -650,7 +757,9 @@ describe("Crash Recovery", () => {
     // Create push replay that crashes after 2nd mutation.
     let pushCount = 0;
     const crashApiClient: ApiClient = {
-      sendMutation: async (mutation: QueuedMutation): Promise<MutationResponse> => {
+      sendMutation: async (
+        mutation: QueuedMutation,
+      ): Promise<MutationResponse> => {
         pushCount++;
         if (pushCount <= 2) {
           // First 2 succeed on server.
@@ -686,7 +795,9 @@ describe("Crash Recovery", () => {
     // Server should have received exactly 2 mutations.
     expect(server.entities.size).toBeGreaterThanOrEqual(2);
     // Verify 2 entities were created.
-    const createdEntities = Array.from(server.entities.keys()).filter(k => k.startsWith("saved_repository:sr"));
+    const createdEntities = Array.from(server.entities.keys()).filter((k) =>
+      k.startsWith("saved_repository:sr"),
+    );
     expect(createdEntities).toHaveLength(2);
 
     // Now replay remaining with a working API client.
@@ -704,15 +815,25 @@ describe("Crash Recovery", () => {
     expect(pending).toHaveLength(0);
 
     // All 5 entities should exist on server.
-    const allEntities = Array.from(server.entities.keys()).filter(k => k.startsWith("saved_repository:sr"));
+    const allEntities = Array.from(server.entities.keys()).filter((k) =>
+      k.startsWith("saved_repository:sr"),
+    );
     expect(allEntities).toHaveLength(5);
   });
 
   // --- Network timeout during push ---
   it("Network timeout during push → mutation stays in queue, retry succeeds", async () => {
-    server.applyMutation("seed", "saved_repository", "sr1", {
-      repositoryId: "r1", status: "saved", note: "original",
-    }, 0);
+    server.applyMutation(
+      "seed",
+      "saved_repository",
+      "sr1",
+      {
+        repositoryId: "r1",
+        status: "saved",
+        note: "original",
+      },
+      0,
+    );
 
     const driver = new InMemoryDriver();
     const store = new LocalStore(driver);
@@ -770,9 +891,17 @@ describe("Crash Recovery", () => {
 
   // --- ACK loss (mutation sent but no response) ---
   it("ACK loss → mutation stays in queue, idempotency prevents duplicate on retry", async () => {
-    server.applyMutation("seed", "saved_repository", "sr1", {
-      repositoryId: "r1", status: "saved", note: "original",
-    }, 0);
+    server.applyMutation(
+      "seed",
+      "saved_repository",
+      "sr1",
+      {
+        repositoryId: "r1",
+        status: "saved",
+        note: "original",
+      },
+      0,
+    );
 
     const driver = new InMemoryDriver();
     const store = new LocalStore(driver);
@@ -794,7 +923,9 @@ describe("Crash Recovery", () => {
     // The mutation IS applied on the server, but client doesn't know.
     let serverReceivedCount = 0;
     const dropAckClient: ApiClient = {
-      sendMutation: async (mutation: QueuedMutation): Promise<MutationResponse> => {
+      sendMutation: async (
+        mutation: QueuedMutation,
+      ): Promise<MutationResponse> => {
         serverReceivedCount++;
         // Server processes it...
         server.applyMutation(
@@ -825,7 +956,9 @@ describe("Crash Recovery", () => {
 
     // Retry with normal client. Idempotency key prevents duplicate.
     const normalClient: ApiClient = {
-      sendMutation: async (mutation: QueuedMutation): Promise<MutationResponse> => {
+      sendMutation: async (
+        mutation: QueuedMutation,
+      ): Promise<MutationResponse> => {
         serverReceivedCount++;
         return server.applyMutation(
           mutation.id, // Same idempotency key!
@@ -890,8 +1023,12 @@ describe("Determinism", () => {
     expect(pair1.clientB.clock.now()).toBe(pair2.clientB.clock.now());
 
     // Same ID sequence.
-    expect(pair1.clientA.idGenerator.uuid()).toBe(pair2.clientA.idGenerator.uuid());
-    expect(pair1.clientB.idGenerator.uuid()).toBe(pair2.clientB.idGenerator.uuid());
+    expect(pair1.clientA.idGenerator.uuid()).toBe(
+      pair2.clientA.idGenerator.uuid(),
+    );
+    expect(pair1.clientB.idGenerator.uuid()).toBe(
+      pair2.clientB.idGenerator.uuid(),
+    );
   });
 
   it("MockServer: same operations → identical change log", () => {

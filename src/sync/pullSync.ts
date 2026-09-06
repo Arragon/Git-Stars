@@ -30,10 +30,7 @@ export interface PullResult {
 export interface PullSyncConfig {
   localStore: LocalStore;
   apiClient: {
-    getChanges(
-      since: number,
-      limit?: number,
-    ): Promise<ChangeFeedResponse>;
+    getChanges(since: number, limit?: number): Promise<ChangeFeedResponse>;
   };
   onStatusChange?: (status: PullStatus) => void;
 }
@@ -77,9 +74,7 @@ export function createPullSync(config: PullSyncConfig): PullSync {
 
   const setStatus = (s: PullStatus) => onStatusChange?.(s);
 
-  async function fetchAndApply(
-    since: number,
-  ): Promise<PullResult> {
+  async function fetchAndApply(since: number): Promise<PullResult> {
     let cursor = since;
     let totalApplied = 0;
     let hasMore = true;
@@ -224,7 +219,10 @@ function applyChange(tx: TransactionContext, change: ChangeEntry): void {
 
     case "repository_tag":
       if (change.op === "deleted") {
-        tx.delete("repositoryTags", `${str(d.savedRepositoryId)}:${str(d.tagId)}`);
+        tx.delete(
+          "repositoryTags",
+          `${str(d.savedRepositoryId)}:${str(d.tagId)}`,
+        );
       } else {
         tx.put<CachedRepositoryTag>("repositoryTags", {
           tagId: str(d.tagId) ?? change.entityId,
@@ -301,5 +299,7 @@ function num(v: unknown): number | undefined {
   return typeof v === "number" ? v : undefined;
 }
 function arr(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  return Array.isArray(v)
+    ? v.filter((x): x is string => typeof x === "string")
+    : [];
 }

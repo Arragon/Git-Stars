@@ -46,9 +46,7 @@ export interface PushReplay {
 // Only preference mutations may be coalesced (field-level merge).
 // Consecutive preference mutations are merged into a single server call.
 
-function coalescePreferences(
-  mutations: QueuedMutation[],
-): QueuedMutation[] {
+function coalescePreferences(mutations: QueuedMutation[]): QueuedMutation[] {
   const result: QueuedMutation[] = [];
 
   for (const m of mutations) {
@@ -118,7 +116,8 @@ export function createPushReplay(config: PushReplayConfig): PushReplay {
           case 409: {
             // Version conflict — attempt auto-resolution via conflict resolvers (INH-419).
             const serverCurrent = err.details
-              ? (err.details as Record<string, unknown>).current ?? err.details
+              ? ((err.details as Record<string, unknown>).current ??
+                err.details)
               : {};
 
             // Record conflict for audit/UI.
@@ -150,7 +149,10 @@ export function createPushReplay(config: PushReplayConfig): PushReplay {
                 });
                 // Mark conflict as auto-resolved.
                 if (conflictId && conflictLog) {
-                  await conflictLog.markResolved(conflictId, resolution.payload);
+                  await conflictLog.markResolved(
+                    conflictId,
+                    resolution.payload,
+                  );
                 }
                 // Retry immediately.
                 try {
@@ -203,7 +205,8 @@ export function createPushReplay(config: PushReplayConfig): PushReplay {
           case 429: {
             // Rate limited → pause with Retry-After.
             const retryAfter = err.details
-              ? Number((err.details as Record<string, unknown>).retryAfter) * 1000
+              ? Number((err.details as Record<string, unknown>).retryAfter) *
+                1000
               : 60_000;
             _retryAfterMs = retryAfter || 60_000;
             paused = true;

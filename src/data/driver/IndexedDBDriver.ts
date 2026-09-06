@@ -1,15 +1,8 @@
 // src/data/driver/IndexedDBDriver.ts
 // Production IndexedDB implementation of LocalStoreDriver.
 
-import type {
-  LocalStoreDriver,
-  StoreName,
-  TransactionContext,
-} from "../types";
-import {
-  CorruptSchemaError,
-  UnsupportedVersionError,
-} from "../types";
+import type { LocalStoreDriver, StoreName, TransactionContext } from "../types";
+import { CorruptSchemaError, UnsupportedVersionError } from "../types";
 import { CLIENT_MIGRATIONS, LATEST_SCHEMA_VERSION } from "../migrations";
 
 interface SchemaMetaRow {
@@ -62,7 +55,9 @@ export class IndexedDBDriver implements LocalStoreDriver {
       };
 
       request.onerror = () => {
-        reject(new Error(`Failed to open IndexedDB: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to open IndexedDB: ${request.error?.message}`),
+        );
       };
 
       request.onblocked = () => {
@@ -93,7 +88,9 @@ export class IndexedDBDriver implements LocalStoreDriver {
         void this.open().then(() => resolve(), reject);
       };
       request.onerror = () =>
-        reject(new Error(`Failed to reset database: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to reset database: ${request.error?.message}`),
+        );
       request.onblocked = () =>
         reject(new Error("Reset blocked by another connection."));
     });
@@ -117,9 +114,7 @@ export class IndexedDBDriver implements LocalStoreDriver {
     }
 
     if (currentVersion < 0) {
-      throw new CorruptSchemaError(
-        `Invalid schema version: ${currentVersion}`,
-      );
+      throw new CorruptSchemaError(`Invalid schema version: ${currentVersion}`);
     }
 
     const pending = CLIENT_MIGRATIONS.filter((m) => m.version > currentVersion);
@@ -152,10 +147,7 @@ export class IndexedDBDriver implements LocalStoreDriver {
     });
   }
 
-  async getAll<T>(
-    store: StoreName,
-    query?: IDBKeyRange | null,
-  ): Promise<T[]> {
+  async getAll<T>(store: StoreName, query?: IDBKeyRange | null): Promise<T[]> {
     if (!this.db) throw new Error("Database not open.");
 
     return new Promise<T[]>((resolve, reject) => {
@@ -210,10 +202,7 @@ export class IndexedDBDriver implements LocalStoreDriver {
             req.onerror = () => rej(req.error);
           });
         },
-        getAll<U>(
-          store: StoreName,
-          query?: IDBKeyRange | null,
-        ): Promise<U[]> {
+        getAll<U>(store: StoreName, query?: IDBKeyRange | null): Promise<U[]> {
           return new Promise<U[]>((res, rej) => {
             const req = idbTx.objectStore(store).getAll(query ?? null);
             req.onsuccess = () => res(req.result as U[]);
@@ -242,7 +231,8 @@ export class IndexedDBDriver implements LocalStoreDriver {
         else resolve(result);
       };
       idbTx.onerror = () => reject(idbTx.error);
-      idbTx.onabort = () => reject(idbTx.error ?? new Error("Transaction aborted"));
+      idbTx.onabort = () =>
+        reject(idbTx.error ?? new Error("Transaction aborted"));
     });
   }
 

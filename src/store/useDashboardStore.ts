@@ -42,7 +42,11 @@ function mapToProject(
     id: sr.id,
     github_id: r ? Number(r.remoteId) || 0 : 0,
     name: r?.name ?? "Unknown",
-    full_name: r ? (r.namespacePath ? `${r.namespacePath}/${r.name}` : r.name) : "Unknown",
+    full_name: r
+      ? r.namespacePath
+        ? `${r.namespacePath}/${r.name}`
+        : r.name
+      : "Unknown",
     description: r?.description ?? "",
     language: r?.primaryLanguage ?? "",
     stars_count: r?.starsCount ?? 0,

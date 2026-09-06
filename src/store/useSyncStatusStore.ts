@@ -60,8 +60,13 @@ export const useSyncStatusStore = create<SyncStatusState>((set, get) => ({
   updatePendingCount: async () => {
     try {
       const pending = await mutationQueue.getPending();
-      const quarantined = pending.filter((m) => m.status === "quarantined").length;
-      set({ pendingMutationCount: pending.length, quarantinedCount: quarantined });
+      const quarantined = pending.filter(
+        (m) => m.status === "quarantined",
+      ).length;
+      set({
+        pendingMutationCount: pending.length,
+        quarantinedCount: quarantined,
+      });
     } catch {
       // ignore
     }
@@ -89,7 +94,9 @@ export const useSyncStatusStore = create<SyncStatusState>((set, get) => ({
         } else {
           const age = Date.now() - new Date(cursor.lastSyncedAt).getTime();
           // Stale if older than 5 minutes
-          set({ repositoryCacheStatus: age > 5 * 60 * 1000 ? "stale" : "fresh" });
+          set({
+            repositoryCacheStatus: age > 5 * 60 * 1000 ? "stale" : "fresh",
+          });
         }
       }
     } catch {

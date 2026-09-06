@@ -35,11 +35,11 @@ const syncApiClient = {
     switch (m.entity) {
       case "saved_repository": {
         if (m.operation === "create") {
-          const res = await apiPost<{ id: string; version: number; etag: string }>(
-            "/api/library",
-            payload,
-            { headers },
-          );
+          const res = await apiPost<{
+            id: string;
+            version: number;
+            etag: string;
+          }>("/api/library", payload, { headers });
           return { version: res.version, etag: res.etag };
         }
         if (m.operation === "delete") {
@@ -57,11 +57,11 @@ const syncApiClient = {
 
       case "list": {
         if (m.operation === "create") {
-          const res = await apiPost<{ id: string; version: number; etag: string }>(
-            "/api/lists",
-            payload,
-            { headers },
-          );
+          const res = await apiPost<{
+            id: string;
+            version: number;
+            etag: string;
+          }>("/api/lists", payload, { headers });
           return { version: res.version, etag: res.etag };
         }
         if (m.operation === "delete") {
@@ -88,7 +88,9 @@ const syncApiClient = {
           return { version: res.version ?? 1, etag: res.etag ?? "" };
         }
         if (m.operation === "delete") {
-          await apiDelete(`/api/lists/${listId}/items`, { item_ids: [m.entityId] });
+          await apiDelete(`/api/lists/${listId}/items`, {
+            item_ids: [m.entityId],
+          });
           return { version: 0, etag: "" };
         }
         const res = await apiPut<{ version: number; etag: string }>(
@@ -101,11 +103,11 @@ const syncApiClient = {
 
       case "tag": {
         if (m.operation === "create") {
-          const res = await apiPost<{ id: string; version: number; etag: string }>(
-            "/api/tags",
-            payload,
-            { headers },
-          );
+          const res = await apiPost<{
+            id: string;
+            version: number;
+            etag: string;
+          }>("/api/tags", payload, { headers });
           return { version: res.version ?? 1, etag: res.etag ?? "" };
         }
         if (m.operation === "delete") {
@@ -116,10 +118,13 @@ const syncApiClient = {
       }
 
       case "repository_tag": {
-        const savedId = (payload.saved_repository_id as string) || m.entityId.split(":")[0];
+        const savedId =
+          (payload.saved_repository_id as string) || m.entityId.split(":")[0];
         const tagId = (payload.tag_id as string) || m.entityId.split(":")[1];
         if (m.operation === "create") {
-          await apiPut(`/api/library/${savedId}/tags/${tagId}`, undefined, { headers });
+          await apiPut(`/api/library/${savedId}/tags/${tagId}`, undefined, {
+            headers,
+          });
           return { version: 1, etag: "" };
         }
         if (m.operation === "delete") {

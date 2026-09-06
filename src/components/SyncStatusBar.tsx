@@ -55,7 +55,12 @@ export const SyncStatusBar: React.FC = () => {
       aria-live="polite"
       title={label}
     >
-      {!icon && <span className={`inline-block w-2 h-2 rounded-full ${dotColor}`} aria-hidden="true" />}
+      {!icon && (
+        <span
+          className={`inline-block w-2 h-2 rounded-full ${dotColor}`}
+          aria-hidden="true"
+        />
+      )}
       {icon}
       <span className="hidden sm:inline">{label}</span>
     </div>

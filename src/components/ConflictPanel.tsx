@@ -30,7 +30,8 @@ export const ConflictPanel: React.FC = () => {
       // Re-enqueue mutation with higher base version (server version + 1)
       const pending = await mutationQueue.getPending();
       const existing = pending.find(
-        (m) => m.entityId === conflict.entityId && m.entity === conflict.entityType,
+        (m) =>
+          m.entityId === conflict.entityId && m.entity === conflict.entityType,
       );
       if (existing) {
         await mutationQueue.updateMutation(existing.id, {
@@ -52,7 +53,8 @@ export const ConflictPanel: React.FC = () => {
       // Discard local mutation, accept server state
       const pending = await mutationQueue.getPending();
       const existing = pending.find(
-        (m) => m.entityId === conflict.entityId && m.entity === conflict.entityType,
+        (m) =>
+          m.entityId === conflict.entityId && m.entity === conflict.entityType,
       );
       if (existing) {
         await mutationQueue.complete(existing.id);
@@ -69,7 +71,8 @@ export const ConflictPanel: React.FC = () => {
     try {
       const pending = await mutationQueue.getPending();
       const existing = pending.find(
-        (m) => m.entityId === conflict.entityId && m.entity === conflict.entityType,
+        (m) =>
+          m.entityId === conflict.entityId && m.entity === conflict.entityType,
       );
       if (existing) {
         await mutationQueue.quarantine(existing.id, "Discarded by user");
@@ -82,7 +85,9 @@ export const ConflictPanel: React.FC = () => {
   };
 
   if (loading) {
-    return <div className="text-sm text-gray-500 p-4">Loading conflicts...</div>;
+    return (
+      <div className="text-sm text-gray-500 p-4">Loading conflicts...</div>
+    );
   }
 
   if (conflicts.length === 0) {
@@ -107,9 +112,7 @@ export const ConflictPanel: React.FC = () => {
             <div className="text-sm font-medium text-gray-800">
               {c.entityType} · {c.operation}
             </div>
-            <div className="text-xs text-gray-500">
-              Entity: {c.entityId}
-            </div>
+            <div className="text-xs text-gray-500">Entity: {c.entityId}</div>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="bg-blue-50 rounded p-2 border border-blue-100">
                 <div className="font-medium text-blue-800 mb-1">

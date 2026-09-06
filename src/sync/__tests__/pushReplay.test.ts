@@ -14,7 +14,11 @@ describe("PushReplay", () => {
   let driver: InMemoryDriver;
   let queue: MutationQueue;
   let mockApi: ApiClient;
-  let sendMutation: ReturnType<typeof vi.fn<(mutation: QueuedMutation) => Promise<{ version: number; etag: string }>>>;
+  let sendMutation: ReturnType<
+    typeof vi.fn<
+      (mutation: QueuedMutation) => Promise<{ version: number; etag: string }>
+    >
+  >;
   let statusChanges: PushStatus[];
 
   beforeEach(async () => {
@@ -23,7 +27,11 @@ describe("PushReplay", () => {
     await driver.migrate();
     queue = createMutationQueue(driver);
 
-    sendMutation = vi.fn<(mutation: QueuedMutation) => Promise<{ version: number; etag: string }>>().mockResolvedValue({ version: 2, etag: '"sr-1:2"' });
+    sendMutation = vi
+      .fn<
+        (mutation: QueuedMutation) => Promise<{ version: number; etag: string }>
+      >()
+      .mockResolvedValue({ version: 2, etag: '"sr-1:2"' });
     mockApi = { sendMutation };
 
     statusChanges = [];
@@ -74,7 +82,12 @@ describe("PushReplay", () => {
       sendMutation
         .mockRejectedValueOnce(
           new ApiError("conflict", "VERSION_CONFLICT", 409, {
-            current: { id: "sr-1", note: "server note", status: "saved", version: 2 },
+            current: {
+              id: "sr-1",
+              note: "server note",
+              status: "saved",
+              version: 2,
+            },
           }),
         )
         .mockResolvedValueOnce({ version: 3, etag: '"sr-1:3"' });

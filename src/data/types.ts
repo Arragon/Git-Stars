@@ -160,7 +160,10 @@ export interface LocalStoreDriver {
 // --- Error classes ---
 
 export class UnsupportedVersionError extends Error {
-  constructor(public foundVersion: number, public latestVersion: number) {
+  constructor(
+    public foundVersion: number,
+    public latestVersion: number,
+  ) {
     super(
       `Found schema version ${foundVersion} is newer than supported ${latestVersion}. ` +
         `Please upgrade the app or reset the local cache.`,

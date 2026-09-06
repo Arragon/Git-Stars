@@ -1,11 +1,7 @@
 // src/data/driver/InMemoryDriver.ts
 // In-memory implementation of LocalStoreDriver for tests.
 
-import type {
-  LocalStoreDriver,
-  StoreName,
-  TransactionContext,
-} from "../types";
+import type { LocalStoreDriver, StoreName, TransactionContext } from "../types";
 import { LATEST_SCHEMA_VERSION } from "../migrations";
 
 type Key = string | number;
@@ -76,10 +72,7 @@ export class InMemoryDriver implements LocalStoreDriver {
     return s.get(toKeyString(key)) as T | undefined;
   }
 
-  async getAll<T>(
-    store: StoreName,
-    _query?: IDBKeyRange | null,
-  ): Promise<T[]> {
+  async getAll<T>(store: StoreName, _query?: IDBKeyRange | null): Promise<T[]> {
     const s = this.stores.get(store);
     if (!s) return [];
     return Array.from(s.values()) as T[];
@@ -114,8 +107,7 @@ export class InMemoryDriver implements LocalStoreDriver {
     }
 
     const ctx: TransactionContext = {
-      get: <U>(store: StoreName, key: IDBValidKey) =>
-        this.get<U>(store, key),
+      get: <U>(store: StoreName, key: IDBValidKey) => this.get<U>(store, key),
       getAll: <U>(store: StoreName, query?: IDBKeyRange | null) =>
         this.getAll<U>(store, query),
       put: <U>(store: StoreName, value: U) => {

@@ -13,10 +13,7 @@ export function compareKeys(a: string, b: string): number {
 
 // Generate a key that sorts strictly between `a` and `b`.
 // Either bound may be null (meaning unbounded on that side).
-export function generateBetween(
-  a: string | null,
-  b: string | null,
-): string {
+export function generateBetween(a: string | null, b: string | null): string {
   // No bounds → start at 'm' (middle of alphabet for room both ways).
   if (!a && !b) return "m";
 
@@ -26,7 +23,8 @@ export function generateBetween(
   // Only upper bound → take predecessor path.
   if (!a && b) {
     // If b starts with something > 'a', just use 'a' + something.
-    if (b.charCodeAt(0) > FIRST) return String.fromCharCode(b.charCodeAt(0) - 1);
+    if (b.charCodeAt(0) > FIRST)
+      return String.fromCharCode(b.charCodeAt(0) - 1);
     // b = 'a...' → use 'a' + midpoint of rest
     return "a" + generateBetween(null, b.slice(1) || null);
   }
@@ -60,7 +58,9 @@ export function generateBetween(
       return aStr + String.fromCharCode(Math.floor((FIRST + nextB) / 2));
     }
     // nextB === 'a', use 'a' + recurse
-    return aStr + "a" + generateBetween(null, bStr.slice(aStr.length + 1) || null);
+    return (
+      aStr + "a" + generateBetween(null, bStr.slice(aStr.length + 1) || null)
+    );
   }
 
   // b is prefix of a → impossible since a < b. Fallback.

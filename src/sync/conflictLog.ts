@@ -20,7 +20,9 @@ export interface ConflictRecord {
 }
 
 export interface ConflictLog {
-  record(conflict: Omit<ConflictRecord, "id" | "createdAt" | "resolution">): Promise<string>;
+  record(
+    conflict: Omit<ConflictRecord, "id" | "createdAt" | "resolution">,
+  ): Promise<string>;
   getUnresolved(): Promise<ConflictRecord[]>;
   markResolved(id: string, resolvedPayload?: unknown): Promise<void>;
   discard(id: string): Promise<void>;

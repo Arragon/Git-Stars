@@ -2,11 +2,18 @@
 // Driver-agnostic contract tests — run against both IndexedDB and InMemory drivers.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import type { LocalStoreDriver, CachedRepository, CachedSavedRepository } from "../types";
+import type {
+  LocalStoreDriver,
+  CachedRepository,
+  CachedSavedRepository,
+} from "../types";
 import { InMemoryDriver } from "../driver/InMemoryDriver";
 import { IndexedDBDriver } from "../driver/IndexedDBDriver";
 
-function makeRepo(id: string, overrides?: Partial<CachedRepository>): CachedRepository {
+function makeRepo(
+  id: string,
+  overrides?: Partial<CachedRepository>,
+): CachedRepository {
   return {
     id,
     providerType: "github",
@@ -36,7 +43,10 @@ function makeSavedRepo(id: string, repoId: string): CachedSavedRepository {
   };
 }
 
-function runContractSuite(driverName: string, createDriver: () => LocalStoreDriver) {
+function runContractSuite(
+  driverName: string,
+  createDriver: () => LocalStoreDriver,
+) {
   describe(`contract: ${driverName}`, () => {
     let driver: LocalStoreDriver;
 
@@ -58,7 +68,10 @@ function runContractSuite(driverName: string, createDriver: () => LocalStoreDriv
       expect(fetched).toEqual(repo);
 
       await driver.delete("repositories", "r1");
-      const afterDelete = await driver.get<CachedRepository>("repositories", "r1");
+      const afterDelete = await driver.get<CachedRepository>(
+        "repositories",
+        "r1",
+      );
       expect(afterDelete).toBeUndefined();
     });
 

@@ -59,9 +59,7 @@ describe("TestHarness", () => {
 
     it("provides a network fault injector", async () => {
       client.network.configure({ offline: true });
-      const wrapped = client.network.wrapFetch(
-        async () => new Response("ok"),
-      );
+      const wrapped = client.network.wrapFetch(async () => new Response("ok"));
       await expect(wrapped("/test")).rejects.toThrow();
     });
   });

@@ -171,7 +171,10 @@ export const Dashboard: React.FC = () => {
         normalizeCollection(item as Record<string, unknown>),
       );
       const nextCollectionProjects = (data || []).flatMap((item) =>
-        ((item as Record<string, unknown>).collection_projects as unknown[] || []).map((project) =>
+        (
+          ((item as Record<string, unknown>)
+            .collection_projects as unknown[]) || []
+        ).map((project) =>
           normalizeCollectionProject(project as Record<string, unknown>),
         ),
       );
