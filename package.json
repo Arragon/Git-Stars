@@ -15,7 +15,8 @@
     "test": "vitest run",
     "preview": "vite preview",
     "check": "tsc -b --noEmit",
-    "api:check": "node scripts/check-api-contract.mjs"
+    "api:check": "node scripts/check-api-contract.mjs",
+    "bench": "tsx scripts/bench.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
