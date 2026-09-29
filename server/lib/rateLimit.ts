@@ -49,3 +49,9 @@ export function hit(
   bucket.count += 1;
   return { ok: true, retryAfterSec: 0 };
 }
+
+// Client IP for per-IP anonymous limits (first X-Forwarded-For hop when behind
+// a proxy; falls back to "unknown" for direct local access).
+export function clientIp(headerXff: string | undefined): string {
+  return headerXff?.split(",")[0]?.trim() || "unknown";
+}

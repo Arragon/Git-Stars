@@ -18,7 +18,8 @@
     "api:check": "node scripts/check-api-contract.mjs",
     "bench": "tsx scripts/bench.ts",
     "migration:check": "tsx scripts/migration-check.ts",
-    "release:manifest": "node scripts/release-manifest.mjs"
+    "release:manifest": "node scripts/release-manifest.mjs",
+    "seed:public": "tsx scripts/seed-public-fixtures.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

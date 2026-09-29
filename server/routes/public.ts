@@ -8,7 +8,7 @@ import {
 } from "../services/publication.js";
 import { importCommit, importPreview } from "../services/listsIo.js";
 import { apiError } from "../httpErrors.js";
-import { hit } from "../lib/rateLimit.js";
+import { hit, clientIp } from "../lib/rateLimit.js";
 
 // Anonymous public share surface (M5, INH-437/443). No requireUser except the
 // import endpoint, which acts on the session user's own library.
@@ -23,10 +23,24 @@ const IMPORT_LIMIT = 20;
 const IMPORT_WINDOW_MS = 60 * 60 * 1000;
 const REPORT_LIMIT = 5;
 const REPORT_WINDOW_MS = 60 * 60 * 1000;
+// Anonymous read limits (INH-451): bound enumeration/abuse without hurting
+// normal browsing. Generous relative to human traffic; keyset on IP.
+const ANON_READ_LIMIT = 120;
+const ANON_READ_WINDOW_MS = 60 * 60 * 1000;
 
 export const publicRoutes = new Hono<{ Variables: AuthedVariables }>();
 
 publicRoutes.get("/public/lists/:shareId", (c) => {
+  const rl = hit(
+    `read:${clientIp(c.req.header("X-Forwarded-For"))}`,
+    ANON_READ_LIMIT,
+    ANON_READ_WINDOW_MS,
+  );
+  if (!rl.ok) {
+    return apiError(c, 429, "RATE_LIMITED", "Too many requests", {
+      retryAfterSec: rl.retryAfterSec,
+    });
+  }
   const snapshot = getPublicSnapshot(c.req.param("shareId"));
   if (!snapshot) {
     return apiError(c, 404, "NOT_FOUND", NOT_FOUND_MESSAGE);
@@ -80,9 +94,11 @@ publicRoutes.post("/public/lists/:shareId/import", requireUser, async (c) => {
 publicRoutes.post("/public/lists/:shareId/report", async (c) => {
   const shareId = c.req.param("shareId");
   // Rate limit per client IP (first X-Forwarded-For hop when behind a proxy).
-  const ip =
-    c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() || "unknown";
-  const rl = hit(`report:${ip}`, REPORT_LIMIT, REPORT_WINDOW_MS);
+  const rl = hit(
+    `report:${clientIp(c.req.header("X-Forwarded-For"))}`,
+    REPORT_LIMIT,
+    REPORT_WINDOW_MS,
+  );
   if (!rl.ok) {
     return apiError(c, 429, "RATE_LIMITED", "Too many reports", {
       retryAfterSec: rl.retryAfterSec,
