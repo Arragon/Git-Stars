@@ -857,6 +857,53 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Preferences" }
+  /account/export:
+    get:
+      tags: [account]
+      summary: >
+        Full authenticated user-data export (INH-476): library (+notes/tags),
+        lists (+item notes), preferences and provider connection metadata.
+        Contains no credential material by construction.
+      responses:
+        "200":
+          description: Account export bundle (format gitstars-account-export, schemaVersion 1)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountExport" }
+  /account/delete:
+    post:
+      tags: [account]
+      summary: >
+        Request account deletion (step 1). Returns a one-time confirmation
+        token; only its SHA-256 is stored server-side.
+      responses:
+        "200":
+          description: Confirmation token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeleteRequest" }
+  /account/delete/confirm:
+    post:
+      tags: [account]
+      summary: >
+        Confirm and execute account deletion (step 2). Runs in a single
+        transaction: sessions, provider credentials (encrypted tokens), all
+        user-owned rows and public publications/Hub entries are removed
+        atomically — no orphan state on mid-deletion failure. Destroys the
+        current session cookie.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation: { type: string }
+      responses:
+        "200": { description: Account deleted }
+        "400": { $ref: "#/components/responses/Error400" }
+        "403": { $ref: "#/components/responses/Error403" }
+        "404": { $ref: "#/components/responses/Error404" }
 components:
   securitySchemes:
     sessionCookie:
@@ -1293,3 +1340,71 @@ components:
           type: string
           maxLength: 500
           description: optional free-text detail, capped server-side at 500 chars
+    DeleteRequest:
+      type: object
+      required: [confirmation]
+      properties:
+        confirmation: { type: string }
+        message: { type: string }
+    AccountExport:
+      type: object
+      required:
+        [
+          format,
+          schemaVersion,
+          exportedAt,
+          profile,
+          library,
+          lists,
+          preferences,
+          providers,
+        ]
+      description: >
+        Portable full-account bundle. Includes user notes and tags (it is the
+        user's own data); never includes provider tokens or encrypted material.
+      properties:
+        format: { type: string, const: gitstars-account-export }
+        schemaVersion: { type: integer, const: 1 }
+        exportedAt: { type: string, format: date-time }
+        profile:
+          type: object
+          properties:
+            username: { type: string }
+            email: { type: [string, "null"] }
+            fullName: { type: [string, "null"] }
+            githubId: { type: string }
+        library:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              status: { type: string }
+              note: { type: [string, "null"] }
+              tags: { type: array, items: { type: string } }
+              repository: { type: object, additionalProperties: true }
+        lists:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              description: { type: string }
+              items:
+                {
+                  type: array,
+                  items: { type: object, additionalProperties: true },
+                }
+        preferences: { type: object, additionalProperties: true }
+        providers:
+          type: array
+          description: Connection metadata only — no tokens.
+          items:
+            type: object
+            properties:
+              providerType: { type: string }
+              host: { type: string }
+              remoteUsername: { type: [string, "null"] }
+              scopes: { type: string }
+              status: { type: string }

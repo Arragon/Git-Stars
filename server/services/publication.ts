@@ -172,7 +172,8 @@ export function serializePublication(row: PublicationRow): PublicationView {
   };
 }
 
-function recordAudit(
+/** Append a non-sensitive audit event (publish/unpublish/report/takedown/...). */
+export function recordAudit(
   actor: string,
   action: string,
   subject: string,

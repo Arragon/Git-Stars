@@ -4,12 +4,7 @@
 // boundaries hold — a failure here blocks CI.
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import {
-  bootstrapDb,
-  cookieFor,
-  seedUser,
-  teardownDb,
-} from "../testing/bootstrap.js";
+import { bootstrapDb, cookieFor, teardownDb } from "../testing/bootstrap.js";
 import { getDb } from "../db.js";
 import {
   seedShareFixtures,

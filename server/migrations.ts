@@ -541,10 +541,24 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_subject ON audit_events(subject);
 `);
 }
 
+function migrationV4(db: DatabaseSync): void {
+  // Account deletion two-step state machine (INH-476): a deletion request stores
+  // only a hash of the confirmation token; execution happens in one transaction
+  // (server/services/accountDeletion.ts) and cascades remove all user-owned rows.
+  db.exec(`
+CREATE TABLE IF NOT EXISTS account_deletions (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL,
+  requested_at TEXT NOT NULL
+);
+`);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "new_domain_tables_and_backfill", up: migrationV1 },
   { version: 2, name: "list_items_position_key_fractional", up: migrationV2 },
   { version: 3, name: "publications_hub_audit", up: migrationV3 },
+  { version: 4, name: "account_deletion_state", up: migrationV4 },
 ];
 
 export function latestSchemaVersion(): number {

@@ -39,6 +39,7 @@ import { publicationRoutes } from "./routes/publications.js";
 import { publicRoutes } from "./routes/public.js";
 import { hubRoutes } from "./routes/hub.js";
 import { adminRoutes } from "./routes/admin.js";
+import { accountRoutes } from "./routes/account.js";
 import type { AuthedVariables } from "./middleware/auth.js";
 import {
   classifyError,
@@ -151,6 +152,8 @@ app.route("/api", publicationRoutes);
 app.route("/api", publicRoutes);
 app.route("/api", hubRoutes);
 app.route("/api", adminRoutes);
+// Account ownership surface (INH-476: export + deletion)
+app.route("/api/account", accountRoutes);
 
 app.notFound((c) => {
   if (c.req.path.startsWith("/api/")) {
