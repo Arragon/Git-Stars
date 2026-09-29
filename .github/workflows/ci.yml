@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -29,20 +31,29 @@ jobs:
         run: npm run check
 
       - name: Lint
-        # main has existing lint errors; remove this after they are cleared.
-        continue-on-error: true
         run: npm run lint
 
       - name: Unit tests
         run: npm test
 
+      - name: API contract check (ADR-0006 D7)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="${{ github.base_ref }}"
+            if git cat-file -e "origin/$BASE_REF:server/openapi.yaml" 2>/dev/null; then
+              git show "origin/$BASE_REF:server/openapi.yaml" > /tmp/openapi.base.yaml
+              OPENAPI_BASE=/tmp/openapi.base.yaml npm run api:check
+            else
+              echo "No committed openapi.yaml on $BASE_REF yet — validation only."
+              npm run api:check
+            fi
+          else
+            npm run api:check
+          fi
+
       - name: Production build
         run: npm run build
 
-      # Known deviations from ADR-0007 D4 (documented for follow-up):
-      # - contract gate (openapi diff + adapter tests): requires server/openapi.yaml which is
-      #   not yet generated. Follow-up: generate openapi.yaml from route definitions and add
-      #   `npx openapi-diff` or similar tooling.
-      # - schema-breaking gate: requires a committed schema baseline file. Follow-up: add
-      #   schema baseline comparison (e.g., compare SQLite schema dumps between commits).
-      # These gates are tracked as known limitations in INH-319 closure.
+      # Known deviation from ADR-0007 D4 (documented for follow-up):
+      # - schema-breaking gate: requires a committed schema baseline file. Follow-up:
+      #   compare SQLite schema dumps between commits (INH-319 / INH-494).

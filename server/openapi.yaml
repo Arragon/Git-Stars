@@ -1,0 +1,922 @@
+# GitStars service API contract (ADR-0006 D7). OpenAPI 3.1.
+# Source of truth for client/server compatibility; CI runs a breaking-change
+# diff against the previously committed revision (scripts/check-api-contract.mjs).
+# DTOs mirror ADR-0002 (normalized repository) / ADR-0003 (user state) /
+# ADR-0004 (sync protocol) — provider-native payloads never appear here.
+openapi: 3.1.0
+info:
+  title: GitStars Service API
+  version: 1.0.0
+  description: |
+    Contract for the GitStars service (local/self-hosted backend, Hono + SQLite).
+
+    Conventions (ADR-0006):
+    - Every response carries `X-Request-Id` (client-supplied or server-generated).
+    - Mutations marked `Idem` honor `Idempotency-Key`; replays return the stored
+      response without re-applying (ADR-0004 D2).
+    - Conditional writes use `If-Match: "<entityId>:<version>"`; stale base → 409
+      VERSION_CONFLICT with `details.current`.
+    - All errors use the standard envelope `{ code, message, details?, request_id }`
+      with the machine-decidable codes cataloged below.
+    - Compatibility: additive changes (new optional fields/entities) do not bump
+      `PROTOCOL_VERSION`; breaking changes bump it and observe an N-1 deprecation
+      window, after which older clients receive 426 STALE_CLIENT (ADR-0004 D5).
+servers:
+  - url: /api
+tags:
+  - name: health
+  - name: auth
+  - name: providers
+  - name: sync
+  - name: repository
+  - name: discover
+  - name: library
+  - name: tags
+  - name: lists
+  - name: preferences
+security:
+  - sessionCookie: []
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Runtime health, versions and provider capabilities
+      security: []
+      responses:
+        "200":
+          description: Current versions and per-provider configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [ok, env, appVersion, protocolVersion]
+                properties:
+                  ok: { type: boolean }
+                  env: { type: string }
+                  appVersion: { type: string }
+                  schemaVersion: { type: integer }
+                  minAppVersion: { type: string }
+                  listSchemaVersion: { type: integer }
+                  protocolVersion: { type: integer }
+                  providers:
+                    type: object
+                    description: provider_type → { configured, capabilities }
+                    additionalProperties: true
+  /auth/session:
+    get:
+      tags: [auth]
+      summary: Current session (null user when anonymous)
+      security: []
+      responses:
+        "200":
+          description: Session state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, devLoginEnabled]
+                properties:
+                  user:
+                    oneOf:
+                      - $ref: "#/components/schemas/SessionUser"
+                      - type: "null"
+                  devLoginEnabled: { type: boolean }
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Destroy the current session
+      responses:
+        "200":
+          description: Session destroyed
+  /auth/github/login:
+    get:
+      tags: [auth]
+      summary: Start GitHub OAuth (302 redirect)
+      security: []
+      responses:
+        "302": { description: Redirect to GitHub authorize URL }
+        "503":
+          $ref: "#/components/responses/Error503"
+  /auth/github/callback:
+    get:
+      tags: [auth]
+      summary: Complete GitHub OAuth (redirects to SPA)
+      security: []
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        "302": { description: Redirect to SPA with session cookie or error }
+  /auth/dev-login:
+    post:
+      tags: [auth]
+      summary: Local development login (gated by LOCAL_DEV_USER / ALLOW_DEV_LOGIN)
+      security: []
+      responses:
+        "200":
+          description: Logged in as the dev user
+        "403":
+          $ref: "#/components/responses/Error403"
+  /providers:
+    get:
+      tags: [providers]
+      summary: List own connected provider accounts (never includes tokens)
+      responses:
+        "200":
+          description: Connected accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProviderAccount" }
+  /providers/{type}/revoke:
+    post:
+      tags: [providers]
+      summary: Revoke a provider account and delete its stored credential
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Revoked }
+        "404": { $ref: "#/components/responses/Error404" }
+  /sync/{provider}:
+    post:
+      tags: [sync]
+      summary: Run a provider membership sync (stars/forks)
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Structured SyncResult (counts, cursor state)
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "429": { $ref: "#/components/responses/Error429" }
+        "501": { $ref: "#/components/responses/Error501" }
+        "502": { $ref: "#/components/responses/Error502" }
+  /changes:
+    get:
+      tags: [sync]
+      summary: Incremental change feed (ADR-0004 D2/D6)
+      description: >
+        Ordered per-user feed with monotonic `seq` cursor. Entries carry an
+        additive optional `data` payload with the row's current committed state so
+        pull clients can materialize their replica without per-entity refetches;
+        hard-deleted rows have `data: null` (client deletes by entityId) and
+        repository_tag deletions reconstruct the composite key from entityId.
+      parameters:
+        - {
+            name: since,
+            in: query,
+            schema: { type: integer, minimum: 0 },
+            description: last seen seq,
+          }
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, minimum: 1, maximum: 500 },
+          }
+      responses:
+        "200":
+          description: Change page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChangeFeed" }
+        "410":
+          description: >
+            CURSOR_INVALID — the cursor is ahead of the feed tail (e.g. server-side
+            database reset). The client must re-pull from 0; queued local mutations
+            are unaffected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /repositories/{id}:
+    get:
+      tags: [repository]
+      summary: Normalized repository view (metadata cache + own saved state)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: refresh, in: query, schema: { type: string, enum: ["1"] } }
+      responses:
+        "200":
+          description: RepositoryView
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RepositoryView" }
+        "404": { $ref: "#/components/responses/Error404" }
+        "501": { $ref: "#/components/responses/Error501" }
+        "502": { $ref: "#/components/responses/Error502" }
+  /repositories/{id}/readme:
+    get:
+      tags: [repository]
+      summary: README (sanitized client-side; read-only)
+      description: Requires provider `readme` capability.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Sanitized README payload
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404": { $ref: "#/components/responses/Error404" }
+        "501": { $ref: "#/components/responses/Error501" }
+  /repositories/{id}/tree:
+    get:
+      tags: [repository]
+      summary: Read-only file tree
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: path, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Tree listing
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404": { $ref: "#/components/responses/Error404" }
+        "501": { $ref: "#/components/responses/Error501" }
+  /repositories/{id}/file:
+    get:
+      tags: [repository]
+      summary: Read-only file content
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: path, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: File content
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404": { $ref: "#/components/responses/Error404" }
+        "501": { $ref: "#/components/responses/Error501" }
+  /repositories/{id}/releases:
+    get:
+      tags: [repository]
+      summary: Releases with assets
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Releases
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404": { $ref: "#/components/responses/Error404" }
+        "501": { $ref: "#/components/responses/Error501" }
+  /repositories/{id}/releases/{assetId}/download:
+    get:
+      tags: [repository]
+      summary: Release-asset download (server-proxied; provider token never leaves the server)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: assetId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Asset binary stream
+        "404": { $ref: "#/components/responses/Error404" }
+        "501": { $ref: "#/components/responses/Error501" }
+        "502": { $ref: "#/components/responses/Error502" }
+  /discover/search:
+    get:
+      tags: [discover]
+      summary: Provider-aware repository search (capability-gated)
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: provider, in: query, schema: { type: string } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Normalized search page
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "501": { $ref: "#/components/responses/Error501" }
+        "502": { $ref: "#/components/responses/Error502" }
+  /library:
+    get:
+      tags: [library]
+      summary: List saved repositories with filter/sort
+      description: >
+        Filter/sort per ADR-0006 D3: `provider`, `tag`, `status`,
+        `sort=added_at|stars|name`, `order=asc|desc`.
+      responses:
+        "200":
+          description: Saved repositories (joined with normalized repository metadata)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SavedRepository" }
+    post:
+      tags: [library]
+      summary: Save a repository by reference (identity resolution server-side)
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [providerType, canonicalKey]
+              properties:
+                providerType: { type: string }
+                canonicalKey: { type: string }
+                host: { type: string }
+      responses:
+        "201":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedRepository" }
+        "400": { $ref: "#/components/responses/Error400" }
+  /library/{id}:
+    get:
+      tags: [library]
+      summary: Read one saved repository
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Saved repository
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedRepository" }
+        "404": { $ref: "#/components/responses/Error404" }
+    put:
+      tags: [library]
+      summary: Update note/status (version-guarded)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { $ref: "#/components/parameters/IfMatch" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: [string, "null"] }
+                status: { type: string }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MutationResult" }
+        "404": { $ref: "#/components/responses/Error404" }
+        "409": { $ref: "#/components/responses/Error409" }
+    delete:
+      tags: [library]
+      summary: Soft delete (tombstone)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "200": { description: Tombstoned }
+        "404": { $ref: "#/components/responses/Error404" }
+  /library/{id}/tags/{tagId}:
+    put:
+      tags: [tags]
+      summary: Attach tag to saved repository (set semantics, idempotent)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: tagId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Attached (or already present) }
+        "404": { $ref: "#/components/responses/Error404" }
+    delete:
+      tags: [tags]
+      summary: Detach tag (set semantics)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: tagId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Detached }
+        "404": { $ref: "#/components/responses/Error404" }
+  /library/import:
+    post:
+      tags: [lists]
+      summary: Portable List import — dry-run preview, then commit with confirm
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PortableList" }
+      responses:
+        "200":
+          description: Preview or import result
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/Error400" }
+  /tags:
+    get:
+      tags: [tags]
+      summary: List own tags
+      responses:
+        "200":
+          description: Tags
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Tag" }
+    post:
+      tags: [tags]
+      summary: Create tag (idempotent by user+name)
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "201":
+          description: Created (200 when the name already exists)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tag" }
+        "400": { $ref: "#/components/responses/Error400" }
+  /tags/{id}:
+    delete:
+      tags: [tags]
+      summary: Delete tag (hard delete + change-feed tombstone)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Deleted }
+        "404": { $ref: "#/components/responses/Error404" }
+  /lists:
+    get:
+      tags: [lists]
+      summary: List own lists
+      responses:
+        "200":
+          description: Lists
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/List" }
+    post:
+      tags: [lists]
+      summary: Create list
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                description: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/List" }
+        "400": { $ref: "#/components/responses/Error400" }
+        "409": { $ref: "#/components/responses/Error409" }
+  /lists/{id}:
+    get:
+      tags: [lists]
+      summary: Read one list with ordered items
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: List with items
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListWithItems" }
+        "404": { $ref: "#/components/responses/Error404" }
+    put:
+      tags: [lists]
+      summary: Update name/description (version-guarded)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { $ref: "#/components/parameters/IfMatch" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/List" }
+        "404": { $ref: "#/components/responses/Error404" }
+        "409": { $ref: "#/components/responses/Error409" }
+    delete:
+      tags: [lists]
+      summary: Soft delete (tombstone)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Tombstoned }
+        "404": { $ref: "#/components/responses/Error404" }
+  /lists/{id}/items:
+    put:
+      tags: [lists]
+      summary: >
+        Ordered membership edit with set semantics + fractional reorder
+        (ADR-0004 D4). add/remove are idempotent; reorder applies fractional
+        position keys deterministically.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                add:
+                  type: array
+                  items: { type: string }
+                  description: savedRepositoryIds to append
+                remove:
+                  type: array
+                  items: { type: string }
+                  description: savedRepositoryIds to remove
+                reorder:
+                  type: array
+                  items: { type: string }
+                  description: savedRepositoryIds in the desired order
+      responses:
+        "200":
+          description: Updated list with items
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListWithItems" }
+        "404": { $ref: "#/components/responses/Error404" }
+  /lists/{id}/export:
+    post:
+      tags: [lists]
+      summary: Export as a sanitized portable List document (LIST_SCHEMA_VERSION 0)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Portable List
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortableList" }
+        "404": { $ref: "#/components/responses/Error404" }
+  /preferences:
+    get:
+      tags: [preferences]
+      summary: Read preference singleton (ETag)
+      responses:
+        "200":
+          description: Preferences
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preferences" }
+    put:
+      tags: [preferences]
+      summary: Shallow field-level merge, then version bump (ADR-0004 D4)
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Merged preferences
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preferences" }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: gitstars_session
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: { type: string, format: uuid }
+      description: Replay-safe mutation key (ADR-0004 D2)
+    IfMatch:
+      name: If-Match
+      in: header
+      schema: { type: string }
+      description: '"<entityId>:<version>" etag of the base the client edited'
+  responses:
+    Error400:
+      description: VALIDATION — bad input
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorEnvelope" } },
+        }
+    Error403:
+      description: FORBIDDEN / DEV_LOGIN_DISABLED
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorEnvelope" } },
+        }
+    Error404:
+      description: NOT_FOUND
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorEnvelope" } },
+        }
+    Error409:
+      description: VERSION_CONFLICT (details.current) or CONFLICT (uniqueness)
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorEnvelope" } },
+        }
+    Error429:
+      description: RATE_LIMITED (details.resetAt)
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorEnvelope" } },
+        }
+    Error501:
+      description: PROVIDER_NOT_IMPLEMENTED (GitLab/Gitee stub)
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorEnvelope" } },
+        }
+    Error502:
+      description: PROVIDER_ERROR (upstream forge failure)
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorEnvelope" } },
+        }
+    Error503:
+      description: OAUTH_NOT_CONFIGURED / feature unavailable
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorEnvelope" } },
+        }
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION
+            - UNAUTHENTICATED
+            - FORBIDDEN
+            - NOT_FOUND
+            - VERSION_CONFLICT
+            - CONFLICT
+            - STALE_CLIENT
+            - RATE_LIMITED
+            - CURSOR_INVALID
+            - PROVIDER_NOT_IMPLEMENTED
+            - PROVIDER_ERROR
+            - OAUTH_NOT_CONFIGURED
+            - OAUTH_EXCHANGE_FAILED
+            - OAUTH_STATE_INVALID
+            - USER_FETCH_FAILED
+            - DEV_LOGIN_DISABLED
+            - INTERNAL_ERROR
+        message: { type: string }
+        details: { type: object, additionalProperties: true }
+        request_id: { type: string }
+    SessionUser:
+      type: object
+      required: [id, username]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        email: { type: [string, "null"] }
+        avatarUrl: { type: [string, "null"] }
+        fullName: { type: [string, "null"] }
+        lastSyncedAt: { type: [string, "null"], format: date-time }
+    ProviderAccount:
+      type: object
+      required: [id, providerType, host, status]
+      description: Never includes tokens or credential material.
+      properties:
+        id: { type: string }
+        providerType: { type: string }
+        host: { type: string }
+        remoteUserId: { type: [string, "null"] }
+        remoteUsername: { type: [string, "null"] }
+        status: { type: string }
+        scopes: { type: string }
+        createdAt: { type: string, format: date-time }
+    RepositoryIdentity:
+      type: object
+      required: [providerType, host, remoteId]
+      properties:
+        providerType: { type: string }
+        host: { type: string }
+        remoteId: { type: string }
+    RepositoryView:
+      type: object
+      required: [id, identity, name, webUrl]
+      properties:
+        id: { type: string }
+        identity: { $ref: "#/components/schemas/RepositoryIdentity" }
+        canonicalKey: { type: string }
+        name: { type: string }
+        namespacePath: { type: string }
+        webUrl: { type: string }
+        description: { type: string }
+        visibility: { type: string }
+        primaryLanguage: { type: string }
+        starsCount: { type: integer }
+        forksCount: { type: integer }
+        status: { type: string }
+        metadataFetchedAt: { type: string, format: date-time }
+        capabilities:
+          type: [object, "null"]
+          description: Per-provider capability flags (readme, releases, search, ...)
+          additionalProperties: true
+        saved:
+          oneOf:
+            - type: "null"
+            - type: object
+              properties:
+                id: { type: string }
+                status: { type: string }
+                note: { type: string }
+                aiSummary: { type: string }
+                version: { type: integer }
+                addedAt: { type: string, format: date-time }
+                tags:
+                  type: array
+                  items: { $ref: "#/components/schemas/Tag" }
+    SavedRepository:
+      type: object
+      required: [id, version, etag, status, repository]
+      properties:
+        id: { type: string }
+        version: { type: integer }
+        etag: { type: string }
+        status: { type: string }
+        note: { type: string }
+        aiSummary: { type: string }
+        aiTags: { type: array, items: { type: string } }
+        addedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        repository:
+          type: object
+          required: [id, providerType, name, webUrl]
+          properties:
+            id: { type: string }
+            providerType: { type: string }
+            host: { type: string }
+            remoteId: { type: string }
+            canonicalKey: { type: string }
+            name: { type: string }
+            namespacePath: { type: string }
+            webUrl: { type: string }
+            description: { type: string }
+            visibility: { type: string }
+            primaryLanguage: { type: string }
+            starsCount: { type: integer }
+            forksCount: { type: integer }
+            status: { type: string }
+        tags:
+          type: array
+          items: { $ref: "#/components/schemas/Tag" }
+    MutationResult:
+      type: object
+      required: [version, etag]
+      properties:
+        id: { type: string }
+        version: { type: integer }
+        etag: { type: string }
+    Tag:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+    List:
+      type: object
+      required: [id, name, version, etag]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        version: { type: integer }
+        etag: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        itemCount: { type: integer }
+    ListItem:
+      type: object
+      required: [id, savedRepositoryId, position]
+      properties:
+        id: { type: string }
+        savedRepositoryId: { type: string }
+        position: { type: string, description: fractional position key }
+        note: { type: string }
+        repository:
+          type: object
+          properties:
+            id: { type: string }
+            providerType: { type: string }
+            name: { type: string }
+            webUrl: { type: string }
+    ListWithItems:
+      allOf:
+        - $ref: "#/components/schemas/List"
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/ListItem" }
+    Preferences:
+      type: object
+      required: [data, version]
+      properties:
+        data: { type: object, additionalProperties: true }
+        version: { type: integer }
+        etag: { type: string }
+    ChangeEntry:
+      type: object
+      required: [seq, entityType, entityId, op, version, createdAt]
+      properties:
+        seq: { type: integer }
+        entityType:
+          type: string
+          enum:
+            - saved_repository
+            - list
+            - list_item
+            - tag
+            - repository_tag
+            - preference
+        entityId: { type: string }
+        op: { type: string, enum: [created, updated, deleted] }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        data:
+          description: >
+            Sanitized current-row payload (additive, ADR-0004 D5); null when the
+            row is hard-deleted. Tombstoned rows include deletedAt.
+    ChangeFeed:
+      type: object
+      required: [changes, nextCursor, hasMore, protocolVersion]
+      properties:
+        changes:
+          type: array
+          items: { $ref: "#/components/schemas/ChangeEntry" }
+        nextCursor: { type: integer }
+        hasMore: { type: boolean }
+        protocolVersion: { type: integer }
+    PortableList:
+      type: object
+      required: [format, schemaVersion, name, items]
+      description: Sanitized portable List document v0 (ADR-0009 / INH-384)
+      properties:
+        format: { type: string, const: gitstars-list }
+        schemaVersion: { type: integer, const: 0 }
+        name: { type: string }
+        description: { type: string }
+        exportedAt: { type: string, format: date-time }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              providerType: { type: string }
+              host: { type: string }
+              canonicalKey: { type: string }
+              name: { type: string }
+              webUrl: { type: string }
+              note: { type: string }
