@@ -214,7 +214,15 @@ export const RepositoryView: React.FC = () => {
               onBlur={(e) => {
                 const v = e.target.value;
                 if (v !== (repo.saved?.note ?? ""))
-                  act(() => updateSaved(repo.saved!.id, { note: v }));
+                  // Version-guarded write (ADR-0004 D4): send the etag of the base
+                  // we saw so a stale edit 409s instead of silently overwriting.
+                  act(() =>
+                    updateSaved(
+                      repo.saved!.id,
+                      { note: v },
+                      `${repo.saved!.id}:${repo.saved!.version}`,
+                    ),
+                  );
               }}
             />
             <div className="flex flex-wrap items-center gap-1.5">
