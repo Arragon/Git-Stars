@@ -7,10 +7,13 @@ import {
   buildAuthorizeUrl,
   exchangeCodeForToken,
   fetchGitHubUser,
+  GITHUB_TOKEN_URL,
+  GITHUB_USER_URL,
   GITHUB_OAUTH_SCOPES,
   GitHubApiError,
   GitHubRateLimitError,
 } from "../github.js";
+import { assertEgressUrl } from "../lib/egress.js";
 import {
   buildClearCookieHeader,
   buildCookieHeader,
@@ -180,6 +183,10 @@ authRoutes.get("/github/callback", async (c) => {
   }
 
   try {
+    // SSRF boundary: both egress URLs are fixed GitHub endpoints, validated here
+    // before any fetch is attempted (assertEgressUrl inside the helpers too).
+    assertEgressUrl(GITHUB_TOKEN_URL);
+    assertEgressUrl(GITHUB_USER_URL);
     const accessToken = await exchangeCodeForToken(code, redirectUri());
     const profile = await fetchGitHubUser(accessToken);
     const { id, conflict } = upsertUserByGithubId({

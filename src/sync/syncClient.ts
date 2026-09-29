@@ -17,6 +17,11 @@ import type { MutationResponse } from "./pushReplay";
 export const mutationQueue = createMutationQueue(localStore);
 export const conflictLog = createConflictLog(localStore);
 
+// Full etag form expected by the server's If-Match parser (ADR-0004 D2).
+export function buildIfMatch(entityId: string, version: number): string {
+  return `${entityId}:${version}`;
+}
+
 // --- API client for push replay ---
 
 const syncApiClient = {
@@ -25,9 +30,10 @@ const syncApiClient = {
       "Idempotency-Key": m.id,
     };
 
-    // Add If-Match for versioned entities
+    // Add If-Match for versioned entities. Server expects the full etag form
+    // `"entityId:version"` (ADR-0004 D2), not a bare version number.
     if (m.baseVersion > 0) {
-      headers["If-Match"] = String(m.baseVersion);
+      headers["If-Match"] = buildIfMatch(m.entityId, m.baseVersion);
     }
 
     const payload = m.payload as Record<string, unknown>;
@@ -77,28 +83,41 @@ const syncApiClient = {
       }
 
       case "list_item": {
-        // list_id is in payload
+        // Membership edits go through PUT /api/lists/:id/items with add/remove/reorder
+        // sets (ADR-0004 D4 set semantics). list_id comes from the payload; entityId
+        // for this entity is the list_item id.
         const listId = (payload.list_id as string) || m.entityId.split(":")[0];
-        if (m.operation === "create") {
-          const res = await apiPost<{ version: number; etag: string }>(
+        const savedId = payload.saved_repository_id as string | undefined;
+        if (m.operation === "delete") {
+          await apiPut(
             `/api/lists/${listId}/items`,
-            payload,
+            { remove: savedId ? [savedId] : [] },
             { headers },
           );
-          return { version: res.version ?? 1, etag: res.etag ?? "" };
-        }
-        if (m.operation === "delete") {
-          await apiDelete(`/api/lists/${listId}/items`, {
-            item_ids: [m.entityId],
-          });
           return { version: 0, etag: "" };
         }
-        const res = await apiPut<{ version: number; etag: string }>(
-          `/api/lists/${listId}/items`,
-          payload,
-          { headers },
-        );
-        return { version: res.version ?? 1, etag: res.etag ?? "" };
+        if (m.operation === "create") {
+          if (!savedId) {
+            throw new Error(
+              "list_item create requires payload.saved_repository_id",
+            );
+          }
+          await apiPut<{ version: number; etag: string }>(
+            `/api/lists/${listId}/items`,
+            { add: [savedId] },
+            { headers },
+          );
+          return { version: 1, etag: "" };
+        }
+        // update: reorder op (fractional indexing is server-side).
+        if (savedId) {
+          await apiPut<{ version: number; etag: string }>(
+            `/api/lists/${listId}/items`,
+            { reorder: [savedId] },
+            { headers },
+          );
+        }
+        return { version: m.baseVersion + 1, etag: "" };
       }
 
       case "tag": {

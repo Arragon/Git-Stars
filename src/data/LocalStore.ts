@@ -28,6 +28,9 @@ export class LocalStore {
   reset() {
     return this.driver.reset();
   }
+  destroy() {
+    return this.driver.destroy();
+  }
   getVersion() {
     return this.driver.getVersion();
   }

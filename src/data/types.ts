@@ -142,6 +142,8 @@ export interface LocalStoreDriver {
   open(): Promise<void>;
   close(): Promise<void>;
   reset(): Promise<void>;
+  /** Hard-delete the backing storage entirely (cache recovery escape hatch). */
+  destroy(): Promise<void>;
   getVersion(): Promise<number>;
   migrate(): Promise<{ applied: number[] }>;
   get<T>(store: StoreName, key: IDBValidKey): Promise<T | undefined>;

@@ -29,6 +29,9 @@ interface SyncStatusState {
   // Cache state
   repositoryCacheStatus: CacheStatus;
 
+  // Local cache recovery (INH-406): set when open/migrate fails hard.
+  cacheError?: "unsupported" | "corrupt";
+
   // Actions
   setOnline(online: boolean): void;
   setPullStatus(status: PullStatus): void;
@@ -37,6 +40,7 @@ interface SyncStatusState {
   updatePendingCount(): Promise<void>;
   updateConflictCount(): Promise<void>;
   updateCacheStatus(): Promise<void>;
+  setCacheError(kind: "unsupported" | "corrupt"): void;
   refreshAll(): Promise<void>;
   reset(): void;
 }
@@ -51,11 +55,13 @@ export const useSyncStatusStore = create<SyncStatusState>((set, get) => ({
   quarantinedCount: 0,
   unresolvedConflictCount: 0,
   repositoryCacheStatus: "empty",
+  cacheError: undefined,
 
   setOnline: (online) => set({ isOnline: online }),
   setPullStatus: (pullStatus) => set({ pullStatus }),
   setPushStatus: (pushStatus) => set({ pushStatus }),
   setPullError: (pullError) => set({ pullError }),
+  setCacheError: (cacheError) => set({ cacheError }),
 
   updatePendingCount: async () => {
     try {
@@ -123,6 +129,7 @@ export const useSyncStatusStore = create<SyncStatusState>((set, get) => ({
       quarantinedCount: 0,
       unresolvedConflictCount: 0,
       repositoryCacheStatus: "empty",
+      cacheError: undefined,
     }),
 }));
 

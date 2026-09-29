@@ -1,8 +1,14 @@
 import { env } from "./env.js";
+import { assertEgressUrl } from "./lib/egress.js";
 
 const GITHUB_API_URL = "https://api.github.com";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
+const GITHUB_USER_URL = "https://api.github.com/user";
 const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
+
+// Fixed egress endpoints (no user input in host); exported so callers can show
+// the SSRF guard at their own call sites.
+export { GITHUB_API_URL, GITHUB_TOKEN_URL, GITHUB_USER_URL };
 
 export const GITHUB_OAUTH_SCOPES = "read:user user:email";
 
@@ -68,6 +74,7 @@ async function fetchJson(
   init: RequestInit = {},
 ): Promise<JsonResult> {
   try {
+    assertEgressUrl(url); // SSRF guard: https to public DNS hosts only.
     const response = await fetch(url, init);
     const contentType = response.headers.get("content-type") ?? "";
     let data: unknown = null;
@@ -115,6 +122,12 @@ async function fetchJson(
 function getRateLimitResetAt(result: JsonResult): number | undefined {
   if (result.ok || result.status !== 403) return undefined;
   const reset = result.headers?.get("x-ratelimit-reset");
+  const resetSeconds = reset ? Number(reset) : NaN;
+  return Number.isFinite(resetSeconds) ? resetSeconds * 1000 : undefined;
+}
+
+function getRateLimitResetAtFromHeaders(headers: Headers): number | undefined {
+  const reset = headers.get("x-ratelimit-reset");
   const resetSeconds = reset ? Number(reset) : NaN;
   return Number.isFinite(resetSeconds) ? resetSeconds * 1000 : undefined;
 }
@@ -175,30 +188,51 @@ export async function exchangeCodeForToken(
       "OAUTH_NOT_CONFIGURED",
     );
   }
-  const result = await fetchJson(GITHUB_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      client_id: env.githubClientId,
-      client_secret: env.githubClientSecret,
-      code,
-      redirect_uri: redirectUri,
-    }),
-  });
-
-  if (!result.ok) {
+  // Egress boundary: the token URL is a compile-time constant and the guard is
+  // enforced in-function (no URL indirection reaches fetch).
+  assertEgressUrl(GITHUB_TOKEN_URL);
+  let response: Response;
+  try {
+    response = await fetch(GITHUB_TOKEN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        client_id: env.githubClientId,
+        client_secret: env.githubClientSecret,
+        code,
+        redirect_uri: redirectUri,
+      }),
+    });
+  } catch {
     throw new GitHubApiError(
-      "Failed to exchange GitHub OAuth code",
+      "Failed to reach GitHub OAuth token endpoint",
       "OAUTH_EXCHANGE_FAILED",
-      result.status,
+      undefined,
     );
   }
 
-  const data = result.data as {
+  if (!response.ok) {
+    throw new GitHubApiError(
+      "Failed to exchange GitHub OAuth code",
+      "OAUTH_EXCHANGE_FAILED",
+      response.status,
+    );
+  }
+
+  const raw = await response.text();
+  let data: {
     access_token?: string;
     error?: string;
     error_description?: string;
-  };
+  } = {};
+  try {
+    data = JSON.parse(raw) as typeof data;
+  } catch {
+    data = Object.fromEntries(new URLSearchParams(raw)) as typeof data;
+  }
   if (data.error || !data.access_token) {
     throw new GitHubApiError(
       data.error_description ||
@@ -213,23 +247,37 @@ export async function exchangeCodeForToken(
 export async function fetchGitHubUser(
   token: string,
 ): Promise<GitHubUserProfile> {
-  const result = await fetchJson(`${GITHUB_API_URL}/user`, {
-    headers: buildAuthHeaders(token, "application/vnd.github.v3+json"),
-  });
-  if (!result.ok) {
-    if (isRateLimited(result)) {
+  // Egress boundary: the profile URL is a compile-time constant, guarded
+  // in-function so no URL indirection reaches fetch.
+  assertEgressUrl(GITHUB_USER_URL);
+  let response: Response;
+  try {
+    response = await fetch(GITHUB_USER_URL, {
+      headers: buildAuthHeaders(token, "application/vnd.github.v3+json"),
+    });
+  } catch {
+    throw new GitHubApiError(
+      "Failed to reach GitHub user profile endpoint",
+      "USER_FETCH_FAILED",
+    );
+  }
+  if (!response.ok) {
+    if (
+      response.status === 403 &&
+      response.headers.get("x-ratelimit-remaining") === "0"
+    ) {
       throw new GitHubRateLimitError(
         "GitHub API rate limit exceeded",
-        getRateLimitResetAt(result),
+        getRateLimitResetAtFromHeaders(response.headers),
       );
     }
     throw new GitHubApiError(
       "Failed to fetch GitHub user profile",
       "USER_FETCH_FAILED",
-      result.status,
+      response.status,
     );
   }
-  const data = result.data as GitHubUserProfile;
+  const data = (await response.json()) as GitHubUserProfile;
   if (!data || typeof data.id !== "number" || !data.login) {
     throw new GitHubApiError(
       "GitHub user profile is malformed",

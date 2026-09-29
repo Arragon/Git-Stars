@@ -7,7 +7,9 @@ import { LATEST_SCHEMA_VERSION } from "../migrations";
 type Key = string | number;
 
 function toKeyString(key: IDBValidKey): string {
-  return String(key);
+  // Compound keys (repositoryTags: [savedRepositoryId, tagId]) normalize the same
+  // way extractKey builds them, so get/put/delete agree across drivers.
+  return Array.isArray(key) ? key.map(String).join(":") : String(key);
 }
 
 export class InMemoryDriver implements LocalStoreDriver {
@@ -48,6 +50,12 @@ export class InMemoryDriver implements LocalStoreDriver {
       store.clear();
     }
     this.schemaVersion = 0;
+  }
+
+  async destroy(): Promise<void> {
+    this.stores.clear();
+    this.schemaVersion = 0;
+    this.isOpen = false;
   }
 
   async getVersion(): Promise<number> {
