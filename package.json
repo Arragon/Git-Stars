@@ -16,7 +16,9 @@
     "preview": "vite preview",
     "check": "tsc -b --noEmit",
     "api:check": "node scripts/check-api-contract.mjs",
-    "bench": "tsx scripts/bench.ts"
+    "bench": "tsx scripts/bench.ts",
+    "migration:check": "tsx scripts/migration-check.ts",
+    "release:manifest": "node scripts/release-manifest.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

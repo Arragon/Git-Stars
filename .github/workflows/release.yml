@@ -1,0 +1,89 @@
+name: Release
+
+# Release pipeline (INH-494). Triggered by version tags (v*). Produces a server
+# deploy artifact + client static build with checksums and a machine-readable
+# manifest. Signing/notarization requires real credentials (External-Block) and
+# is NEVER faked: artifacts are labeled "unsigned-test-artifact" by the manifest.
+#
+# Gates: identical to CI (format/check/lint/test/api:check/build) plus a database
+# migration dry-run. Any failing gate aborts the job — no "ready" state is emitted.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: TypeScript check
+        run: npm run check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests (unit / contract / integration / sync-conformance)
+        run: npm test
+
+      - name: API contract check
+        run: npm run api:check
+
+      - name: Production build
+        run: npm run build
+
+      - name: Database migration dry-run
+        run: npm run migration:check
+
+      - name: Package server deploy artifact
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p release
+          tar czf "release/gitstars-${VERSION}-server.tar.gz" \
+            dist server package.json package-lock.json \
+            server/openapi.yaml
+          cp dist/index.html release/gitstars-${VERSION}-client-static.html 2>/dev/null || true
+
+      - name: Checksums + release manifest
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd release
+          sha256sum * > checksums.txt
+          node ../scripts/release-manifest.mjs * > manifest.json
+          cat manifest.json
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitstars-release-${{ github.ref_name }}
+          path: release/
+          if-no-files-found: error
+
+      - name: Job summary
+        run: |
+          {
+            echo "## Release ${{ github.ref_name }} (unsigned-test-artifact)"
+            echo ""
+            echo "- Provenance: commit ${{ github.sha }}, manifest.json (protocol/schema versions, sha256 checksums)"
+            echo "- Gates: format, typecheck, lint, tests, API contract, build, migration dry-run — all required"
+            echo "- Signing/notarization: **External-Block** (no credentials in this environment; artifacts are unsigned test artifacts)"
+            echo "- Rollback: see docs/runbooks/db-migration-failure.md; operator checklist: docs/RELEASE-CHECKLIST.md"
+          } >> "$GITHUB_STEP_SUMMARY"
