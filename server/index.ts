@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { logger } from "hono/logger";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -38,6 +39,14 @@ import { publicationRoutes } from "./routes/publications.js";
 import { publicRoutes } from "./routes/public.js";
 import { hubRoutes } from "./routes/hub.js";
 import { adminRoutes } from "./routes/admin.js";
+import type { AuthedVariables } from "./middleware/auth.js";
+import {
+  classifyError,
+  incrementMetric,
+  log,
+  logRequest,
+  userRef,
+} from "./lib/obs.js";
 
 const app = new Hono();
 
@@ -49,6 +58,34 @@ app.use("/api/*", async (c, next) => {
   const requestId = c.req.header("X-Request-Id") || randomUUID();
   c.header("X-Request-Id", requestId);
   await next();
+});
+
+// Structured audit-safe request log + low-cardinality metrics (INH-485). Path is
+// logged without query strings; user identity is an anonymous HMAC-derived ref.
+app.use("/api/*", async (c, next) => {
+  const start = Date.now();
+  await next();
+  const status = c.res.status;
+  // `app` is an untyped Hono instance (mixed auth/anon routers): read the
+  // session-scoped variable through a typed context view.
+  const userId = (c as unknown as Context<{ Variables: AuthedVariables }>).get(
+    "userId",
+  );
+  const userRefValue = userRef(userId);
+  logRequest({
+    requestId: c.res.headers.get("X-Request-Id") ?? "",
+    method: c.req.method,
+    path: c.req.path,
+    status,
+    durationMs: Date.now() - start,
+    userRef: userRefValue,
+  });
+  if (status >= 400) {
+    incrementMetric({
+      name: "http_errors_total",
+      labels: { class: status >= 500 ? "server" : "client" },
+    });
+  }
 });
 
 // Protocol version guard (ADR-0004 D5): reject too-old clients without mutating any data.
@@ -130,7 +167,20 @@ app.notFound((c) => {
 });
 
 app.onError((err, c) => {
-  console.error("[server] unhandled error:", err);
+  // Structured, classified, redacted error telemetry (INH-485): distinguishes
+  // provider failure / db / auth / validation / conflict / internal classes so
+  // runbooks can route the response without inspecting payloads.
+  const errorClass = classifyError(err);
+  incrementMetric({
+    name: "unhandled_errors_total",
+    labels: { class: errorClass },
+  });
+  log("error", "unhandled_error", {
+    requestId: c.req.header("X-Request-Id"),
+    path: c.req.path,
+    errorClass,
+    errorMessage: err instanceof Error ? err.message : String(err),
+  });
   if (c.req.path.startsWith("/api/")) {
     return c.json(
       {
