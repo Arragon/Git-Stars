@@ -7,6 +7,8 @@ import { ProjectDetail } from "./pages/ProjectDetail";
 import { Library } from "./pages/Library";
 import { RepositoryView } from "./pages/RepositoryView";
 import { Lists } from "./pages/Lists";
+import { Hub } from "./pages/Hub";
+import { PublicListPage } from "./pages/PublicListPage";
 import {
   useSyncStatusStore,
   startSyncStatusPolling,
@@ -84,6 +86,10 @@ function App() {
             <Route path="lists" element={<Lists />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="project/:id" element={<ProjectDetail />} />
+            {/* M5 public surfaces: render without a session (Layout exempts
+                /hub and /s/* from its anonymous redirect). */}
+            <Route path="hub" element={<Hub />} />
+            <Route path="s/:shareId" element={<PublicListPage />} />
           </Route>
         </Routes>
       </SyncProvider>

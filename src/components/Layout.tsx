@@ -21,6 +21,11 @@ export const Layout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Public M5 surfaces render without a session; everything else keeps the
+  // anonymous -> "/" redirect.
+  const isPublicPath =
+    location.pathname.startsWith("/hub") || location.pathname.startsWith("/s/");
+
   useEffect(() => {
     console.log("[Layout] Fetching session from backend...");
 
@@ -34,7 +39,7 @@ export const Layout: React.FC = () => {
         setDevLoginInfo(session.devLoginEnabled, session.devLoginUsername);
         setIsLoading(false);
 
-        if (!session.user && location.pathname !== "/") {
+        if (!session.user && location.pathname !== "/" && !isPublicPath) {
           console.log(
             "[Layout] Redirecting to / because no user session found",
           );
@@ -50,11 +55,18 @@ export const Layout: React.FC = () => {
         console.error("[Layout] Failed to fetch session:", error);
         setUser(null);
         setIsLoading(false);
-        if (location.pathname !== "/") {
+        if (location.pathname !== "/" && !isPublicPath) {
           navigate("/");
         }
       });
-  }, [navigate, location.pathname, setUser, setIsLoading, setDevLoginInfo]);
+  }, [
+    navigate,
+    location.pathname,
+    isPublicPath,
+    setUser,
+    setIsLoading,
+    setDevLoginInfo,
+  ]);
 
   const handleLogout = async () => {
     try {
@@ -108,6 +120,9 @@ export const Layout: React.FC = () => {
                   <Link to="/lists" className="text-gray-300 hover:text-white">
                     Lists
                   </Link>
+                  <Link to="/hub" className="text-gray-300 hover:text-white">
+                    Hub
+                  </Link>
                 </nav>
                 <div className="flex items-center">
                   {user.avatar_url && (
@@ -129,6 +144,13 @@ export const Layout: React.FC = () => {
                   <LogOut className="h-5 w-5" />
                 </button>
               </div>
+            )}
+            {!user && (
+              <nav className="flex items-center space-x-3 text-sm">
+                <Link to="/hub" className="text-gray-300 hover:text-white">
+                  Hub
+                </Link>
+              </nav>
             )}
           </div>
         </div>

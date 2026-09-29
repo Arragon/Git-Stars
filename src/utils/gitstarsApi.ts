@@ -293,6 +293,111 @@ export interface ProviderAccount {
 }
 export const listProviders = () => apiGet<ProviderAccount[]>("/api/providers");
 
+// Sharing & Hub (M5, INH-431/435/437/443). Publications are not synced user
+// state; these calls hit the sharing endpoints directly.
+
+export interface PublicationView {
+  shareId: string;
+  status: "active" | "revoked" | "takedown";
+  snapshotVersion: number;
+  title: string;
+  repositoryCount: number;
+  updatedAt: string;
+  shareUrl: string;
+  hubOptIn: boolean;
+}
+
+export const publishList = (listId: string) =>
+  apiPost<PublicationView>(
+    `/api/lists/${listId}/publication`,
+    {},
+    { headers: { "Idempotency-Key": idemKey() } },
+  );
+export const getPublication = (listId: string) =>
+  apiGet<PublicationView>(`/api/lists/${listId}/publication`);
+export const revokePublication = (listId: string) =>
+  apiDelete<{ ok: boolean }>(`/api/lists/${listId}/publication`);
+export const setHubOptIn = (listId: string, optIn: boolean) =>
+  apiPut<{ ok: boolean; hubOptIn: boolean }>(`/api/lists/${listId}/hub`, {
+    optIn,
+  });
+
+export interface PublicListItem {
+  providerType: string;
+  host: string;
+  remoteId?: string;
+  canonicalKey: string;
+  name: string;
+  webUrl: string;
+  description?: string | null;
+  primaryLanguage?: string | null;
+  starsCount: number;
+  repositoryId?: string;
+  unavailable?: true;
+}
+
+export interface PublicListSnapshot {
+  shareId: string;
+  title: string;
+  description: string;
+  repositoryCount: number;
+  availableCount: number;
+  updatedAt: string;
+  hubOptIn: boolean;
+  items: PublicListItem[];
+}
+
+export const fetchPublicList = (shareId: string) =>
+  apiGet<PublicListSnapshot>(
+    `/api/public/lists/${encodeURIComponent(shareId)}`,
+  );
+export const importPublicList = (shareId: string) =>
+  apiPost<{ listId: string; name: string; itemCount: number }>(
+    `/api/public/lists/${encodeURIComponent(shareId)}/import`,
+    {},
+    { headers: { "Idempotency-Key": idemKey() } },
+  );
+export const reportPublicList = (
+  shareId: string,
+  reason: "spam" | "inappropriate" | "copyright" | "other",
+  detail?: string,
+) =>
+  apiPost<{ ok: boolean }>(
+    `/api/public/lists/${encodeURIComponent(shareId)}/report`,
+    { reason, ...(detail ? { detail } : {}) },
+  );
+
+export interface HubCatalogEntry {
+  shareId: string;
+  title: string;
+  description: string;
+  repositoryCount: number;
+  updatedAt: string;
+}
+
+export interface HubCatalogPage {
+  items: HubCatalogEntry[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export const fetchHubLists = (
+  params: {
+    q?: string;
+    sort?: "recent" | "title";
+    cursor?: string;
+    limit?: number;
+  } = {},
+) => {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.sort) qs.set("sort", params.sort);
+  if (params.cursor) qs.set("cursor", params.cursor);
+  if (params.limit) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiGet<HubCatalogPage>(`/api/hub/lists${suffix}`);
+};
+
 // Changes (change feed)
 export interface ChangeEntry {
   seq: number;
