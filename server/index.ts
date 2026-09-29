@@ -34,6 +34,10 @@ import { providerRoutes } from "./routes/providers.js";
 import { changesRoutes } from "./routes/changes.js";
 import { repositoryRoutes } from "./routes/repositories.js";
 import { discoverRoutes } from "./routes/discover.js";
+import { publicationRoutes } from "./routes/publications.js";
+import { publicRoutes } from "./routes/public.js";
+import { hubRoutes } from "./routes/hub.js";
+import { adminRoutes } from "./routes/admin.js";
 
 const app = new Hono();
 
@@ -105,6 +109,11 @@ app.route("/api/providers", providerRoutes);
 app.route("/api/changes", changesRoutes);
 app.route("/api/repositories", repositoryRoutes);
 app.route("/api/discover", discoverRoutes);
+// M5 sharing & hub surface (ADR-0006 D1: principal anon | user | admin)
+app.route("/api", publicationRoutes);
+app.route("/api", publicRoutes);
+app.route("/api", hubRoutes);
+app.route("/api", adminRoutes);
 
 app.notFound((c) => {
   if (c.req.path.startsWith("/api/")) {

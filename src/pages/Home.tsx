@@ -53,7 +53,14 @@ export const Home: React.FC = () => {
 
     try {
       await apiPost("/api/auth/dev-login");
-      window.location.assign("/library");
+      // Honor an app-relative redirect (e.g. /?redirect=/s/<shareId> from a
+      // public share page) so the post-login flow returns where the user was.
+      const redirect = searchParams.get("redirect");
+      window.location.assign(
+        redirect && redirect.startsWith("/") && !redirect.startsWith("//")
+          ? redirect
+          : "/library",
+      );
     } catch (err) {
       console.error("[Home] Dev login failed:", err);
       setError(

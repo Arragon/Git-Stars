@@ -20,7 +20,7 @@ vi.mock("./env.js", () => ({
   devLoginEnabled: false,
 }));
 
-import { runMigrations } from "./migrations.js";
+import { latestSchemaVersion, runMigrations } from "./migrations.js";
 import { decryptSecret } from "./crypto.js";
 import { resetDbForTests } from "./db.js";
 
@@ -178,9 +178,11 @@ describe("migration v1: new domain + backfill", () => {
     seedLegacy(db);
     runMigrations(db);
     const reposBefore = count(db, "repositories");
+    const migrationsBefore = count(db, "migrations");
     runMigrations(db);
     expect(count(db, "repositories")).toBe(reposBefore);
-    expect(count(db, "migrations")).toBe(2);
+    expect(migrationsBefore).toBe(latestSchemaVersion());
+    expect(count(db, "migrations")).toBe(migrationsBefore);
   });
 
   it("protects user knowledge: a repository referenced by a SavedRepository cannot be deleted", () => {

@@ -34,6 +34,9 @@ tags:
   - name: tags
   - name: lists
   - name: preferences
+  - name: sharing
+  - name: hub
+  - name: admin
 security:
   - sessionCookie: []
 
@@ -581,6 +584,251 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PortableList" }
         "404": { $ref: "#/components/responses/Error404" }
+  /lists/{id}/publication:
+    post:
+      tags: [sharing]
+      summary: >
+        Publish or republish a list (share link). Republishing an active
+        publication refreshes the sanitized snapshot in place and bumps
+        snapshot_version; a revoked publication is reactivated. Rate limited to
+        10 requests per user per hour.
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "201":
+          description: Publication created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Publication" }
+        "200":
+          description: Publication refreshed (republish/reactivate)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Publication" }
+        "404": { $ref: "#/components/responses/Error404" }
+        "409": { $ref: "#/components/responses/Error409" }
+        "429": { $ref: "#/components/responses/Error429" }
+    get:
+      tags: [sharing]
+      summary: Owner-only publication status (404 when never published)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Publication status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Publication" }
+        "404": { $ref: "#/components/responses/Error404" }
+    delete:
+      tags: [sharing]
+      summary: Revoke the share link (unpublish; the list itself is untouched)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                {
+                  type: object,
+                  required: [ok],
+                  properties: { ok: { type: boolean } },
+                }
+        "404": { $ref: "#/components/responses/Error404" }
+  /lists/{id}/hub:
+    put:
+      tags: [sharing]
+      summary: Opt the active publication into (or out of) the public Hub catalog
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [optIn]
+              properties:
+                optIn: { type: boolean }
+      responses:
+        "200":
+          description: Hub visibility updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, hubOptIn]
+                properties:
+                  ok: { type: boolean }
+                  hubOptIn: { type: boolean }
+        "400": { $ref: "#/components/responses/Error400" }
+        "404": { $ref: "#/components/responses/Error404" }
+        "409": { $ref: "#/components/responses/Error409" }
+  /public/lists/{shareId}:
+    get:
+      tags: [sharing]
+      summary: Anonymous public snapshot of a share link (active publications only)
+      security: []
+      parameters:
+        - {
+            name: shareId,
+            in: path,
+            required: true,
+            schema: { type: string, pattern: "^[0-9A-HJKMNP-TV-Z]{26}$" },
+          }
+      responses:
+        "200":
+          description: Sanitized public snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicListSnapshot" }
+        "404":
+          description: >
+            NOT_FOUND — unknown, revoked or taken-down shareId. The message is
+            identical in all three cases so shareIds cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /public/lists/{shareId}/import:
+    post:
+      tags: [sharing]
+      summary: >
+        Import a shared list as an independent private list for the session
+        user (Portable List v0 pipeline; unknown providers retained as
+        'unresolved'). Rate limited to 20 per user per hour.
+      parameters:
+        - {
+            name: shareId,
+            in: path,
+            required: true,
+            schema: { type: string, pattern: "^[0-9A-HJKMNP-TV-Z]{26}$" },
+          }
+      responses:
+        "201":
+          description: Created list summary
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [listId, name, itemCount]
+                properties:
+                  listId: { type: string }
+                  name: { type: string }
+                  itemCount: { type: integer }
+        "401": { $ref: "#/components/responses/Error401" }
+        "404": { $ref: "#/components/responses/Error404" }
+        "429": { $ref: "#/components/responses/Error429" }
+  /public/lists/{shareId}/report:
+    post:
+      tags: [sharing]
+      summary: Report a share link (anonymous; never reveals whether it exists)
+      security: []
+      description: Rate limited to 5 reports per IP per hour; unknown shareIds also answer 202.
+      parameters:
+        - {
+            name: shareId,
+            in: path,
+            required: true,
+            schema: { type: string, pattern: "^[0-9A-HJKMNP-TV-Z]{26}$" },
+          }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReportRequest" }
+      responses:
+        "202":
+          description: Report accepted (regardless of shareId existence)
+          content:
+            application/json:
+              schema:
+                {
+                  type: object,
+                  required: [ok],
+                  properties: { ok: { type: boolean } },
+                }
+        "400": { $ref: "#/components/responses/Error400" }
+        "429": { $ref: "#/components/responses/Error429" }
+  /hub/lists:
+    get:
+      tags: [hub]
+      summary: Public Hub catalog (active + hub_opt_in publications only)
+      security: []
+      parameters:
+        - {
+            name: q,
+            in: query,
+            schema: { type: string },
+            description: case-insensitive substring on title or description,
+          }
+        - {
+            name: sort,
+            in: query,
+            schema: { type: string, enum: [recent, title] },
+          }
+        - {
+            name: cursor,
+            in: query,
+            schema: { type: string },
+            description: opaque keyset cursor,
+          }
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, minimum: 1, maximum: 50 },
+          }
+      responses:
+        "200":
+          description: Catalog page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubCatalogPage" }
+  /hub/lists/{shareId}:
+    get:
+      tags: [hub]
+      summary: Same public snapshot as /public/lists/{shareId}
+      security: []
+      parameters:
+        - { name: shareId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Sanitized public snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicListSnapshot" }
+        "404": { $ref: "#/components/responses/Error404" }
+  /admin/publications/{shareId}/takedown:
+    post:
+      tags: [admin]
+      summary: >
+        Admin takedown of a publication (audit 'takedown', actor 'admin'). The
+        private source list is never touched. Disabled unless ADMIN_TOKEN is set.
+      security:
+        - adminBearer: []
+      parameters:
+        - { name: shareId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Taken down
+          content:
+            application/json:
+              schema:
+                {
+                  type: object,
+                  required: [ok],
+                  properties: { ok: { type: boolean } },
+                }
+        "401":
+          description: UNAUTHENTICATED — wrong bearer token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "404": { $ref: "#/components/responses/Error404" }
+        "503":
+          description: ADMIN_NOT_CONFIGURED — ADMIN_TOKEN is not set on this server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   /preferences:
     get:
       tags: [preferences]
@@ -615,6 +863,10 @@ components:
       type: apiKey
       in: cookie
       name: gitstars_session
+    adminBearer:
+      type: http
+      scheme: bearer
+      description: ADMIN_TOKEN bearer credential for admin endpoints (M5)
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -636,6 +888,13 @@ components:
         }
     Error403:
       description: FORBIDDEN / DEV_LOGIN_DISABLED
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorEnvelope" } },
+        }
+    Error401:
+      description: UNAUTHENTICATED — no/invalid session or credential
       content:
         {
           application/json:
@@ -707,6 +966,7 @@ components:
             - OAUTH_STATE_INVALID
             - USER_FETCH_FAILED
             - DEV_LOGIN_DISABLED
+            - ADMIN_NOT_CONFIGURED
             - INTERNAL_ERROR
         message: { type: string }
         details: { type: object, additionalProperties: true }
@@ -920,3 +1180,116 @@ components:
               name: { type: string }
               webUrl: { type: string }
               note: { type: string }
+    Publication:
+      type: object
+      description: >
+        Owner view of a list publication. shareId is a 26-char Crockford base32
+        public handle (never a UUID, never the internal list id).
+      required:
+        [
+          shareId,
+          status,
+          snapshotVersion,
+          title,
+          repositoryCount,
+          updatedAt,
+          shareUrl,
+          hubOptIn,
+        ]
+      properties:
+        shareId:
+          type: string
+          pattern: "^[0-9A-HJKMNP-TV-Z]{26}$"
+        status: { type: string, enum: [active, revoked, takedown] }
+        snapshotVersion: { type: integer, minimum: 1 }
+        title: { type: string }
+        repositoryCount: { type: integer, minimum: 0 }
+        updatedAt: { type: string, format: date-time }
+        shareUrl:
+          { type: string, description: relative SPA route for the share link }
+        hubOptIn: { type: boolean }
+    PublicListSnapshot:
+      type: object
+      description: >
+        Sanitized public projection of an active publication (M5). Available
+        items carry public provider metadata only plus a read-time repositoryId
+        (opaque handle for the Repository View route); unavailable items expose
+        nothing at all.
+      required:
+        [
+          shareId,
+          title,
+          description,
+          repositoryCount,
+          availableCount,
+          updatedAt,
+          hubOptIn,
+          items,
+        ]
+      properties:
+        shareId:
+          type: string
+          pattern: "^[0-9A-HJKMNP-TV-Z]{26}$"
+        title: { type: string }
+        description: { type: string }
+        repositoryCount: { type: integer, minimum: 0 }
+        availableCount: { type: integer, minimum: 0 }
+        updatedAt: { type: string, format: date-time }
+        hubOptIn: { type: boolean }
+        items:
+          type: array
+          items:
+            oneOf:
+              - type: object
+                description: Available (public) repository entry
+                required:
+                  [providerType, host, canonicalKey, name, webUrl, starsCount]
+                properties:
+                  providerType: { type: string }
+                  host: { type: string }
+                  remoteId: { type: string }
+                  canonicalKey: { type: string }
+                  name: { type: string }
+                  webUrl: { type: string }
+                  description: { type: [string, "null"] }
+                  primaryLanguage: { type: [string, "null"] }
+                  starsCount: { type: integer }
+                  repositoryId:
+                    type: string
+                    description: opaque internal handle for /repository/{repositoryId}
+              - type: object
+                description: Unavailable entry — order placeholder, no metadata leaked
+                required: [unavailable]
+                properties:
+                  unavailable: { type: boolean, const: true }
+    HubCatalogEntry:
+      type: object
+      description: Catalog card; NEVER includes link-only or revoked/taken-down publications.
+      required: [shareId, title, description, repositoryCount, updatedAt]
+      properties:
+        shareId:
+          type: string
+          pattern: "^[0-9A-HJKMNP-TV-Z]{26}$"
+        title: { type: string }
+        description: { type: string }
+        repositoryCount: { type: integer, minimum: 0 }
+        updatedAt: { type: string, format: date-time }
+    HubCatalogPage:
+      type: object
+      required: [items, nextCursor, hasMore]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/HubCatalogEntry" }
+        nextCursor:
+          { type: [string, "null"], description: opaque keyset cursor }
+        hasMore: { type: boolean }
+    ReportRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, enum: [spam, inappropriate, copyright, other] }
+        detail:
+          type: string
+          maxLength: 500
+          description: optional free-text detail, capped server-side at 500 chars
