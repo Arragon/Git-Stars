@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowLeft,
+  Sparkles,
   Star,
   Bookmark,
   BookmarkCheck,
@@ -21,12 +22,14 @@ import {
   getRepository,
   getTree,
   listTags,
+  updateSaved,
   type ReleaseView,
   type RepositoryDetailView,
   type Tag,
   type TreeEntryView,
 } from "../utils/gitstarsApi";
 import { renderMarkdownSafe } from "../lib/markdown";
+import { summarizeProject } from "../utils/ai";
 import { ApiError } from "../utils/api";
 import {
   attachTagToSaved,
@@ -54,6 +57,7 @@ export const RepositoryView: React.FC = () => {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
   const isOnline = useSyncStatusStore((s) => s.isOnline);
 
   const [readme, setReadme] = useState<string | null>(null);
@@ -115,6 +119,55 @@ export const RepositoryView: React.FC = () => {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** Generate summary + tags via the configured AI vendor, then persist. */
+  const runAiSummary = () => {
+    const saved = repo?.saved;
+    if (!saved || aiBusy) return;
+    if (!isOnline) {
+      setError("AI 总结需要联网后使用");
+      return;
+    }
+    setAiBusy(true);
+    setError("");
+    void (async () => {
+      try {
+        const result = await summarizeProject(
+          repo!.name,
+          repo!.description ?? "",
+          repo!.primaryLanguage ?? "",
+          saved.tags.map((t) => t.name),
+        );
+        const res = await updateSaved(
+          saved.id,
+          { aiSummary: result.summary, aiTags: result.tags },
+          `${saved.id}:${saved.version}`,
+        );
+        setRepo((current) =>
+          current && current.saved
+            ? {
+                ...current,
+                saved: {
+                  ...current.saved,
+                  aiSummary: result.summary,
+                  aiTags: result.tags,
+                  version: res.version,
+                },
+              }
+            : current,
+        );
+      } catch (err) {
+        setError(
+          friendly(
+            err,
+            "AI 总结失败：请确认已在 设置 → AI 设置 中选择厂商并填写 API Key",
+          ),
+        );
+      } finally {
+        setAiBusy(false);
+      }
+    })();
+  };
 
   // Load tab data on demand, gated by provider capabilities (ADR-0002 D4).
   useEffect(() => {
@@ -339,6 +392,31 @@ export const RepositoryView: React.FC = () => {
                   );
               }}
             />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={runAiSummary}
+                disabled={aiBusy}
+                className="inline-flex items-center gap-1 text-xs bg-purple-600 text-white px-2.5 py-1 rounded hover:bg-purple-700 disabled:opacity-50"
+              >
+                <Sparkles
+                  className={`h-3.5 w-3.5 ${aiBusy ? "animate-pulse" : ""}`}
+                />
+                {aiBusy
+                  ? "生成中..."
+                  : repo.saved.aiSummary
+                    ? "重新生成 AI 总结"
+                    : "AI 总结"}
+              </button>
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                摘要与标签由已配置的 AI 厂商生成（设置 → AI 设置）
+              </span>
+            </div>
+            {repo.saved.aiSummary && (
+              <div className="text-sm bg-purple-50 dark:bg-purple-950/40 border border-purple-100 dark:border-purple-900 rounded px-3 py-2 text-purple-900 dark:text-purple-200">
+                {repo.saved.aiSummary}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-1.5">
               {repo.saved.tags.map((t) => (
                 <span
@@ -369,6 +447,14 @@ export const RepositoryView: React.FC = () => {
                   >
                     <X className="h-3 w-3" />
                   </button>
+                </span>
+              ))}
+              {(repo.saved.aiTags ?? []).map((name) => (
+                <span
+                  key={`ai-${name}`}
+                  className="inline-flex items-center gap-1 bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 text-xs rounded px-2 py-0.5"
+                >
+                  <Sparkles className="h-3 w-3" /> {name}
                 </span>
               ))}
               <input

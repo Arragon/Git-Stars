@@ -57,6 +57,8 @@ export interface RepositoryDetailView extends RepositoryProjection {
     id: string;
     status: string;
     note?: string;
+    aiSummary?: string;
+    aiTags?: string[];
     version: number;
     addedAt: string;
     tags: Array<{ id: string; name: string }>;
@@ -122,7 +124,12 @@ export const getSaved = (id: string) =>
   apiGet<SavedRepository>(`/api/library/${id}`);
 export const updateSaved = (
   id: string,
-  patch: { note?: string; status?: string },
+  patch: {
+    note?: string;
+    status?: string;
+    aiSummary?: string;
+    aiTags?: string[];
+  },
   etag?: string,
 ) =>
   apiPut<SavedRepository>(`/api/library/${id}`, patch, {

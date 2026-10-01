@@ -6,6 +6,7 @@ import {
   ExternalLink,
   RefreshCw,
   Search,
+  Sparkles,
   Star,
   X,
 } from "lucide-react";
@@ -241,7 +242,7 @@ export const Library: React.FC = () => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6 text-gray-900 dark:text-gray-100">
+    <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-5 text-gray-900 dark:text-gray-100">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Library</h1>
         <button
@@ -383,33 +384,36 @@ export const Library: React.FC = () => {
         </span>
       </div>
 
-      <div className="space-y-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 items-start">
         {items.map((it) => (
           <div
             key={it.id}
-            className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4"
+            className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-3 flex flex-col gap-2 hover:border-gray-300 dark:hover:border-gray-700 transition-colors"
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <Link
                   to={`/repository/${it.repository.id}`}
-                  className="text-base font-semibold hover:underline"
+                  className="text-sm font-semibold hover:underline block truncate"
+                  title={`${it.repository.namespacePath ? `${it.repository.namespacePath}/` : ""}${it.repository.name}`}
                 >
                   {it.repository.namespacePath
                     ? `${it.repository.namespacePath}/`
                     : ""}
                   {it.repository.name}
                 </Link>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-3">
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-2">
                   <span className="uppercase">
                     {it.repository.providerType}
                   </span>
-                  <span className="inline-flex items-center gap-1">
+                  <span className="inline-flex items-center gap-0.5">
                     <Star className="h-3 w-3" />
                     {it.repository.starsCount}
                   </span>
                   {it.repository.primaryLanguage && (
-                    <span>{it.repository.primaryLanguage}</span>
+                    <span className="truncate">
+                      {it.repository.primaryLanguage}
+                    </span>
                   )}
                   {it.repository.visibility === "private" && (
                     <span className="text-amber-600 dark:text-amber-400">
@@ -417,11 +421,6 @@ export const Library: React.FC = () => {
                     </span>
                   )}
                 </div>
-                {it.repository.description && (
-                  <p className="text-sm text-gray-600 dark:text-gray-300 mt-1 line-clamp-2">
-                    {it.repository.description}
-                  </p>
-                )}
               </div>
               <button
                 onClick={() => {
@@ -438,21 +437,30 @@ export const Library: React.FC = () => {
               </button>
             </div>
 
-            <div className="mt-3">
-              <NoteEditor
-                initial={it.note}
-                onSave={(note) =>
-                  runMutation(() =>
-                    updateSavedFields(
-                      { id: it.id, version: it.version },
-                      { note },
-                    ),
-                  )
-                }
-              />
-            </div>
+            {it.repository.description && (
+              <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
+                {it.repository.description}
+              </p>
+            )}
 
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {it.aiSummary && (
+              <div className="text-xs bg-purple-50 dark:bg-purple-950/40 border border-purple-100 dark:border-purple-900 rounded px-2 py-1.5 text-purple-900 dark:text-purple-200 line-clamp-3">
+                <Sparkles className="h-3 w-3 inline mr-1 -mt-0.5" />
+                {it.aiSummary}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {it.aiTags.map((name) => (
+                <span
+                  key={`ai-${name}`}
+                  title="AI 标签（重新生成时更新）"
+                  className="inline-flex items-center gap-0.5 bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 text-xs rounded px-1.5 py-0.5"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  {name}
+                </span>
+              ))}
               {it.tags.map((t) => (
                 <span
                   key={t.id}
@@ -471,7 +479,7 @@ export const Library: React.FC = () => {
                 </span>
               ))}
               <input
-                className="text-xs border border-dashed border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 w-28 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-400"
+                className="text-xs border border-dashed border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 w-24 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-400"
                 placeholder="+ tag"
                 disabled={busy}
                 onKeyDown={async (e) => {
@@ -500,10 +508,24 @@ export const Library: React.FC = () => {
                 }}
               />
             </div>
+
+            <div className="mt-auto">
+              <NoteEditor
+                initial={it.note}
+                onSave={(note) =>
+                  runMutation(() =>
+                    updateSavedFields(
+                      { id: it.id, version: it.version },
+                      { note },
+                    ),
+                  )
+                }
+              />
+            </div>
           </div>
         ))}
         {items.length === 0 && !loading && (
-          <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
+          <div className="md:col-span-2 xl:col-span-3 text-center py-12 bg-white dark:bg-gray-900 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
             <Star className="h-10 w-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
             <p className="text-gray-600 dark:text-gray-300 text-sm mb-1">
               收藏库还是空的
