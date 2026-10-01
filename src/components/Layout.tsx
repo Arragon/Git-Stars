@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
-import { Github, LogOut } from "lucide-react";
+import { Star, LogOut } from "lucide-react";
 import { apiGet } from "../utils/api";
 import { signOutAndResetLocal } from "../utils/session";
 import { useAuthStore, SessionUser } from "../store/useAuthStore";
@@ -86,43 +86,57 @@ export const Layout: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
       <nav className="bg-gray-900 text-white shadow-sm flex-shrink-0 z-10 relative">
-        <div className="w-full px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="flex justify-between h-14">
             <div
-              className="flex items-center cursor-pointer"
+              className="flex items-center cursor-pointer select-none"
               onClick={() => (user ? navigate("/library") : navigate("/"))}
             >
-              <Github className="h-8 w-8 text-white" />
-              <span className="ml-2 text-xl font-bold">GitStars</span>
+              <span className="inline-flex items-center justify-center h-7 w-7 rounded-md bg-brand-500">
+                <Star
+                  className="h-4.5 w-4.5 h-4 w-4 text-gray-900"
+                  fill="currentColor"
+                />
+              </span>
+              <span className="ml-2 text-lg font-semibold tracking-tight">
+                GitStars
+              </span>
             </div>
 
             {user && (
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center gap-3">
                 <SyncStatusBar />
-                <nav className="flex items-center space-x-3 text-sm">
-                  <Link
-                    to="/library"
-                    className="text-gray-300 hover:text-white"
-                  >
-                    Library
-                  </Link>
-                  <Link to="/lists" className="text-gray-300 hover:text-white">
-                    Lists
-                  </Link>
-                  <Link to="/hub" className="text-gray-300 hover:text-white">
-                    Hub
-                  </Link>
-                  <Link
-                    to="/settings"
-                    className="text-gray-300 hover:text-white"
-                  >
-                    Settings
-                  </Link>
+                <nav className="flex items-center gap-1 text-sm">
+                  {[
+                    { to: "/library", label: "Library" },
+                    { to: "/lists", label: "Lists" },
+                    { to: "/hub", label: "Hub" },
+                    { to: "/settings", label: "Settings" },
+                  ].map(({ to, label }) => {
+                    const active =
+                      to === "/library"
+                        ? location.pathname === "/library" ||
+                          location.pathname.startsWith("/repository/")
+                        : location.pathname.startsWith(to);
+                    return (
+                      <Link
+                        key={to}
+                        to={to}
+                        className={`px-3 py-1.5 rounded-md transition-colors ${
+                          active
+                            ? "bg-gray-800 text-white font-medium"
+                            : "text-gray-300 hover:text-white hover:bg-gray-800/60"
+                        }`}
+                      >
+                        {label}
+                      </Link>
+                    );
+                  })}
                 </nav>
                 <div className="flex items-center">
                   {user.avatar_url && (
                     <img
-                      className="h-8 w-8 rounded-full border border-gray-700"
+                      className="h-7 w-7 rounded-full border border-gray-700"
                       src={user.avatar_url}
                       alt={user.full_name || user.username || "User avatar"}
                     />
@@ -133,16 +147,23 @@ export const Layout: React.FC = () => {
                 </div>
                 <button
                   onClick={handleLogout}
-                  className="p-2 text-gray-300 hover:text-white hover:bg-gray-800 rounded-md transition-colors"
+                  className="p-2 text-gray-300 hover:text-white hover:bg-gray-800 rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
                   title="Logout"
                 >
-                  <LogOut className="h-5 w-5" />
+                  <LogOut className="h-4.5 w-4.5 h-4 w-4" />
                 </button>
               </div>
             )}
             {!user && (
-              <nav className="flex items-center space-x-3 text-sm">
-                <Link to="/hub" className="text-gray-300 hover:text-white">
+              <nav className="flex items-center text-sm">
+                <Link
+                  to="/hub"
+                  className={`px-3 py-1.5 rounded-md transition-colors ${
+                    location.pathname.startsWith("/hub")
+                      ? "bg-gray-800 text-white font-medium"
+                      : "text-gray-300 hover:text-white hover:bg-gray-800/60"
+                  }`}
+                >
                   Hub
                 </Link>
               </nav>
@@ -158,10 +179,10 @@ export const Layout: React.FC = () => {
       </main>
 
       <footer className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 mt-auto">
-        <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-          <p className="text-center text-sm text-gray-500 dark:text-gray-400">
-            &copy; {new Date().getFullYear()} GitStars. Visualizing your GitHub
-            stars and forks.
+        <div className="max-w-7xl mx-auto py-5 px-4 sm:px-6">
+          <p className="text-center text-xs text-gray-400 dark:text-gray-500">
+            &copy; {new Date().getFullYear()} GitStars ·
+            收藏、整理并离线浏览你的 GitHub 仓库
           </p>
         </div>
       </footer>

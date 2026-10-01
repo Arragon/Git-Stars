@@ -58,6 +58,14 @@ import {
 } from "../utils/libraryFilters";
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
 import { ActivityBadge } from "../components/ActivityBadge";
+import {
+  Button,
+  Notice,
+  EmptyState,
+  Input,
+  Select,
+  PageHeader,
+} from "../components/ui";
 
 const resultKey = (r: SearchItemView): string =>
   `${r.identity.providerType}:${r.identity.remoteId}`;
@@ -423,62 +431,57 @@ export const Library: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-5 text-gray-900 dark:text-gray-100">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Library</h1>
-        <div className="flex items-center gap-2">
-          {batch ? (
-            <button
-              type="button"
-              onClick={() => {
-                batchStopRef.current = true;
-              }}
-              className="inline-flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-red-700"
-            >
-              暂停批量总结（{batch.done}/{batch.total}）
-            </button>
-          ) : (
-            <details className="relative">
-              <summary className="inline-flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-purple-700 cursor-pointer list-none">
-                <Sparkles className="h-4 w-4" /> AI 批量总结
-              </summary>
-              <div className="absolute right-0 z-20 mt-1 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg py-1 text-sm">
-                <button
-                  type="button"
-                  onClick={() =>
-                    void startBatchSummarize("missing").then(() => {
-                      const el = document.activeElement as HTMLElement | null;
-                      el?.blur();
-                    })
-                  }
-                  className="block w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700"
-                >
-                  补充缺失总结
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void startBatchSummarize("all").then(() => {
-                      const el = document.activeElement as HTMLElement | null;
-                      el?.blur();
-                    })
-                  }
-                  className="block w-full text-left px-3 py-2 text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700"
-                >
-                  全部重新生成…
-                </button>
-              </div>
-            </details>
-          )}
-          <button
-            onClick={() => void syncNow()}
-            disabled={busy}
-            className="inline-flex items-center gap-2 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50"
+      <PageHeader
+        title="Library"
+        description="收藏、整理并离线浏览你的 GitHub 仓库"
+      >
+        {batch ? (
+          <Button
+            variant="danger"
+            onClick={() => {
+              batchStopRef.current = true;
+            }}
           >
-            <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />{" "}
-            Sync GitHub
-          </button>
-        </div>
-      </div>
+            暂停批量总结（{batch.done}/{batch.total}）
+          </Button>
+        ) : (
+          <details className="relative">
+            <summary className="inline-flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-purple-700 cursor-pointer list-none">
+              <Sparkles className="h-4 w-4" /> AI 批量总结
+            </summary>
+            <div className="absolute right-0 z-20 mt-1 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg py-1 text-sm">
+              <button
+                type="button"
+                onClick={() =>
+                  void startBatchSummarize("missing").then(() => {
+                    const el = document.activeElement as HTMLElement | null;
+                    el?.blur();
+                  })
+                }
+                className="block w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                补充缺失总结
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void startBatchSummarize("all").then(() => {
+                    const el = document.activeElement as HTMLElement | null;
+                    el?.blur();
+                  })
+                }
+                className="block w-full text-left px-3 py-2 text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                全部重新生成…
+              </button>
+            </div>
+          </details>
+        )}
+        <Button onClick={() => void syncNow()} disabled={busy}>
+          <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
+          Sync GitHub
+        </Button>
+      </PageHeader>
 
       {batch && (
         <div className="bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900 rounded px-3 py-2">
@@ -506,21 +509,12 @@ export const Library: React.FC = () => {
         </div>
       )}
 
-      {error && (
-        <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div className="text-sm text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 rounded px-3 py-2">
-          {notice}
-        </div>
-      )}
+      {error && <Notice tone="error">{error}</Notice>}
+      {notice && <Notice tone="info">{notice}</Notice>}
 
       <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-3">
         <div className="flex gap-2">
-          <input
-            className="flex-1 text-sm border border-gray-200 dark:border-gray-700 rounded px-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder-gray-400"
+          <Input
             placeholder="Discover repositories on GitHub..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -528,12 +522,9 @@ export const Library: React.FC = () => {
               if (e.key === "Enter") void onSearch();
             }}
           />
-          <button
-            onClick={() => void onSearch()}
-            className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 px-3 py-2 rounded text-sm"
-          >
+          <Button variant="secondary" onClick={() => void onSearch()}>
             <Search className="h-4 w-4" /> Search
-          </button>
+          </Button>
         </div>
         {results && (
           <ul className="mt-3 divide-y divide-gray-100 dark:divide-gray-800">
@@ -603,8 +594,8 @@ export const Library: React.FC = () => {
         <div className="flex flex-wrap gap-2">
           <div className="relative flex-1 min-w-[14rem]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded pl-8 pr-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder-gray-400"
+            <Input
+              className="pl-8"
               placeholder="在收藏库中搜索（名称 / 描述 / AI 摘要 / 备注）..."
               value={filters.search}
               onChange={(e) => setFilter({ search: e.target.value })}
@@ -629,20 +620,18 @@ export const Library: React.FC = () => {
               </button>
             ))}
           </div>
-          <select
+          <Select
             value={filters.provider}
             onChange={(e) => setFilter({ provider: e.target.value })}
-            className="border border-gray-200 dark:border-gray-700 rounded px-2 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-sm"
           >
             <option value="">All providers</option>
             <option value="github">GitHub</option>
             <option value="gitlab">GitLab</option>
             <option value="gitee">Gitee</option>
-          </select>
-          <select
+          </Select>
+          <Select
             value={filters.language}
             onChange={(e) => setFilter({ language: e.target.value })}
-            className="border border-gray-200 dark:border-gray-700 rounded px-2 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-sm"
           >
             <option value="">All languages</option>
             {languages.map((lang) => (
@@ -650,11 +639,10 @@ export const Library: React.FC = () => {
                 {lang}
               </option>
             ))}
-          </select>
-          <select
+          </Select>
+          <Select
             value={filters.tag}
             onChange={(e) => setFilter({ tag: e.target.value })}
-            className="border border-gray-200 dark:border-gray-700 rounded px-2 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-sm"
           >
             <option value="">All tags</option>
             {tags.map((t) => (
@@ -662,18 +650,17 @@ export const Library: React.FC = () => {
                 {t.name}
               </option>
             ))}
-          </select>
-          <select
+          </Select>
+          <Select
             value={filters.sort}
             onChange={(e) =>
               setFilter({ sort: e.target.value as LibraryFilters["sort"] })
             }
-            className="border border-gray-200 dark:border-gray-700 rounded px-2 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-sm"
           >
             <option value="added_at">Sort: Recently added</option>
             <option value="stars">Sort: Stars</option>
             <option value="name">Sort: Name</option>
-          </select>
+          </Select>
         </div>
 
         {aiTagOptions.length > 0 && (
@@ -944,31 +931,30 @@ export const Library: React.FC = () => {
           );
         })}
         {items.length === 0 && !loading && (
-          <div className="md:col-span-2 xl:col-span-3 text-center py-12 bg-white dark:bg-gray-900 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
-            <Star className="h-10 w-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-            <p className="text-gray-600 dark:text-gray-300 text-sm mb-1">
-              {activeFilterCount > 0
+          <EmptyState
+            className="md:col-span-2 xl:col-span-3"
+            icon={<Star />}
+            title={
+              activeFilterCount > 0
                 ? "没有符合筛选条件的仓库"
-                : "收藏库还是空的"}
-            </p>
-            <p className="text-gray-400 dark:text-gray-500 text-xs mb-4">
-              {activeFilterCount > 0
+                : "收藏库还是空的"
+            }
+            description={
+              activeFilterCount > 0
                 ? "试试清除筛选条件"
-                : "同步你的 GitHub Stars 和 Forks，构建可离线使用的收藏库。"}
-            </p>
-            {activeFilterCount === 0 && (
-              <button
-                onClick={() => void syncNow()}
-                disabled={busy}
-                className="inline-flex items-center gap-2 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50"
-              >
-                <RefreshCw
-                  className={`h-4 w-4 ${busy ? "animate-spin" : ""}`}
-                />
-                同步 GitHub Stars
-              </button>
-            )}
-          </div>
+                : "同步你的 GitHub Stars 和 Forks，构建可离线使用的收藏库。"
+            }
+            action={
+              activeFilterCount === 0 ? (
+                <Button onClick={() => void syncNow()} disabled={busy}>
+                  <RefreshCw
+                    className={`h-4 w-4 ${busy ? "animate-spin" : ""}`}
+                  />
+                  同步 GitHub Stars
+                </Button>
+              ) : undefined
+            }
+          />
         )}
       </div>
     </div>

@@ -3,9 +3,9 @@ import { useSearchParams } from "react-router-dom";
 import {
   Github,
   Star,
-  GitFork,
   Search,
-  BarChart3,
+  ListChecks,
+  Share2,
   AlertCircle,
   Terminal,
 } from "lucide-react";
@@ -72,43 +72,47 @@ export const Home: React.FC = () => {
 
   const features = [
     {
-      icon: <Star className="h-6 w-6 text-yellow-500" />,
-      title: "Visualize Stars",
+      icon: <Star className="h-5 w-5 text-brand-500" />,
+      title: "收藏库",
       description:
-        "Get a clear overview of all your starred repositories in one beautiful dashboard.",
+        "同步 GitHub Stars 与 Forks，构建可离线浏览、可搜索、可打标签的个人收藏库。",
     },
     {
-      icon: <GitFork className="h-6 w-6 text-blue-500" />,
-      title: "Track Forks",
+      icon: <ListChecks className="h-5 w-5 text-blue-500" />,
+      title: "列表管理",
       description:
-        "Keep track of the projects you have forked and monitor their original repositories.",
+        "用列表组织仓库：手动整理或依据 AI 摘要智能归类，支持导出导入与迁移。",
     },
     {
-      icon: <Search className="h-6 w-6 text-green-500" />,
-      title: "Advanced Search",
+      icon: <Search className="h-5 w-5 text-green-600" />,
+      title: "发现与搜索",
       description:
-        "Easily find specific repositories with powerful filtering and search capabilities.",
+        "全网搜索 GitHub 仓库，一键收藏；库内按语言、标签、类型多维筛选。",
     },
     {
-      icon: <BarChart3 className="h-6 w-6 text-purple-500" />,
-      title: "Analytics",
+      icon: <Share2 className="h-5 w-5 text-purple-500" />,
+      title: "分享与 Hub",
       description:
-        "View statistics about languages, top starred repositories, and your activity.",
+        "把列表发布为公开分享链接，选择进入 Hub 广场，让别人一键复制你的精选。",
     },
   ];
 
   return (
-    <div className="flex flex-col items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-3xl w-full text-center space-y-8">
-        <div className="space-y-4">
-          <Github className="mx-auto h-20 w-20 text-gray-900" />
-          <h1 className="text-4xl tracking-tight font-extrabold text-gray-900 sm:text-5xl md:text-6xl">
-            <span className="block">Manage your GitHub</span>
-            <span className="block text-blue-600">Stars & Forks</span>
+    <div className="flex flex-col items-center py-14 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-5xl w-full text-center space-y-10">
+        <div className="space-y-5">
+          <span className="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-gray-900 shadow-card mx-auto">
+            <Star className="h-9 w-9 text-brand-400" fill="currentColor" />
+          </span>
+          <h1 className="text-4xl tracking-tight font-bold text-gray-900 dark:text-gray-50 sm:text-5xl">
+            <span className="block">收藏、整理并离线浏览</span>
+            <span className="block mt-1">
+              你的 <span className="text-brand-500">GitHub Stars</span>
+            </span>
           </h1>
-          <p className="mt-3 max-w-md mx-auto text-base text-gray-500 sm:text-lg md:mt-5 md:text-xl md:max-w-3xl">
-            A beautiful, modern dashboard to visualize, organize, and search
-            through all your GitHub starred repositories and forks.
+          <p className="max-w-2xl mx-auto text-base text-gray-500 dark:text-gray-400 sm:text-lg">
+            把散落的 Star 变成结构化的收藏库：AI
+            自动提炼摘要与标签、列表化组织、跨设备离线同步，还能把精选分享给任何人。
           </p>
         </div>
 
@@ -121,25 +125,23 @@ export const Home: React.FC = () => {
           </div>
         )}
 
-        <div className="mt-10 max-w-sm mx-auto sm:max-w-none sm:flex sm:justify-center sm:space-x-4">
+        <div className="max-w-sm mx-auto sm:max-w-none sm:flex sm:justify-center sm:gap-4">
           <button
             onClick={handleLogin}
             disabled={isLoggingIn || isDevLoggingIn}
-            className={`w-full flex items-center justify-center px-8 py-3 border border-transparent text-base font-medium rounded-md text-white bg-gray-900 hover:bg-gray-800 md:py-4 md:text-lg md:px-10 transition-colors ${
-              isLoggingIn || isDevLoggingIn
-                ? "opacity-75 cursor-not-allowed"
-                : ""
+            className={`w-full inline-flex items-center justify-center px-8 py-3 text-base font-medium rounded-md text-white bg-gray-900 hover:bg-gray-700 sm:w-auto transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 ${
+              isLoggingIn || isDevLoggingIn ? "cursor-not-allowed" : ""
             }`}
           >
             {isLoggingIn ? (
               <span className="flex items-center">
-                <div className="animate-spin mr-3 h-5 w-5 border-b-2 border-white rounded-full"></div>
-                Connecting to GitHub...
+                <span className="animate-spin mr-3 h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
+                正在连接 GitHub…
               </span>
             ) : (
               <span className="flex items-center">
                 <Github className="mr-2 h-5 w-5" />
-                Sign in with GitHub
+                使用 GitHub 登录
               </span>
             )}
           </button>
@@ -148,50 +150,43 @@ export const Home: React.FC = () => {
             <button
               onClick={handleDevLogin}
               disabled={isLoggingIn || isDevLoggingIn}
-              className={`mt-4 sm:mt-0 w-full flex items-center justify-center px-6 py-3 border border-gray-300 text-base font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 md:py-4 md:text-lg transition-colors ${
-                isLoggingIn || isDevLoggingIn
-                  ? "opacity-75 cursor-not-allowed"
-                  : ""
+              className={`w-full sm:w-auto inline-flex items-center justify-center px-6 py-3 border border-gray-300 dark:border-gray-700 text-base font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 ${
+                isLoggingIn || isDevLoggingIn ? "cursor-not-allowed" : ""
               }`}
-              title="Local development login (no OAuth required)"
+              title="本地开发登录（无需 OAuth）"
             >
               {isDevLoggingIn ? (
                 <span className="flex items-center">
-                  <div className="animate-spin mr-3 h-5 w-5 border-b-2 border-gray-600 rounded-full"></div>
-                  Signing in...
+                  <span className="animate-spin mr-3 h-5 w-5 border-2 border-gray-600 border-t-transparent rounded-full" />
+                  登录中…
                 </span>
               ) : (
                 <span className="flex items-center">
-                  <Terminal className="mr-2 h-5 w-5" />
-                  Sign in as {devLoginUsername}
+                  <Terminal className="mr-2 h-5 w-5" />以 {devLoginUsername}{" "}
+                  登录
                 </span>
               )}
             </button>
           )}
         </div>
 
-        <div className="mt-24">
-          <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
-            {features.map((feature, index) => (
-              <div key={index} className="pt-6">
-                <div className="flow-root bg-white rounded-lg px-6 pb-8 shadow-sm h-full border border-gray-100 hover:shadow-md transition-shadow">
-                  <div className="-mt-6">
-                    <div>
-                      <span className="inline-flex items-center justify-center p-3 bg-gray-50 rounded-md shadow-sm border border-gray-100">
-                        {feature.icon}
-                      </span>
-                    </div>
-                    <h3 className="mt-8 text-lg font-medium text-gray-900 tracking-tight">
-                      {feature.title}
-                    </h3>
-                    <p className="mt-5 text-base text-gray-500">
-                      {feature.description}
-                    </p>
-                  </div>
-                </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 text-left">
+          {features.map((feature) => (
+            <div
+              key={feature.title}
+              className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 shadow-card p-5 hover:shadow-card-hover transition-shadow"
+            >
+              <div className="inline-flex items-center justify-center h-9 w-9 rounded-md bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
+                {feature.icon}
               </div>
-            ))}
-          </div>
+              <h3 className="mt-4 text-base font-semibold text-gray-900 dark:text-gray-100 tracking-tight">
+                {feature.title}
+              </h3>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+                {feature.description}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
     </div>
