@@ -7,10 +7,12 @@ import {
   Pencil,
   Plus,
   Share2,
+  Sparkles,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
+import { autoCollectForList } from "../utils/autoCollect";
 import {
   exportList,
   getPublication,
@@ -313,6 +315,36 @@ export const Lists: React.FC = () => {
       selected && !selected.items.some((i) => i.savedRepositoryId === s.id),
   );
 
+  // --- 智能归类（Auto Collect）：按列表描述匹配 AI 摘要/标签自动加入 ---
+  const [autoCollectBusy, setAutoCollectBusy] = useState(false);
+  const runAutoCollect = async () => {
+    if (!selected || autoCollectBusy) return;
+    if (!selected.description.trim()) {
+      setNotice("请先为列表填写描述（智能归类依据描述与 AI 摘要/标签匹配）。");
+      return;
+    }
+    const matches = autoCollectForList(addable, selected);
+    if (matches.length === 0) {
+      setNotice(
+        "没有新匹配的仓库：智能归类依据列表描述与各仓库的 AI 摘要/标签进行匹配。",
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        `依据列表描述与 AI 摘要/标签，匹配到 ${matches.length} 个仓库。加入「${selected.name}」？`,
+      )
+    ) {
+      return;
+    }
+    setAutoCollectBusy(true);
+    try {
+      await mutateItems({ add: matches.map((m) => m.item.id) });
+    } finally {
+      setAutoCollectBusy(false);
+    }
+  };
+
   // --- Share (publication) management -------------------------------------
   const openShare = async (list: ListSummary) => {
     setShareTarget(list);
@@ -555,13 +587,27 @@ export const Lists: React.FC = () => {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-semibold">{selected.name}</h2>
-                <button
-                  onClick={() => setSelected(null)}
-                  className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center"
-                  aria-label="关闭"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void runAutoCollect()}
+                    disabled={autoCollectBusy}
+                    title="依据列表描述与 AI 摘要/标签，把收藏库中的匹配仓库自动加入此列表"
+                    className="inline-flex items-center gap-1 text-xs bg-purple-600 text-white px-2.5 py-1.5 rounded hover:bg-purple-700 disabled:opacity-50"
+                  >
+                    <Sparkles
+                      className={`h-3.5 w-3.5 ${autoCollectBusy ? "animate-pulse" : ""}`}
+                    />
+                    {autoCollectBusy ? "归类中..." : "智能归类"}
+                  </button>
+                  <button
+                    onClick={() => setSelected(null)}
+                    className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center"
+                    aria-label="关闭"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
               <ul className="space-y-1">
                 {selected.items.map((item, index) => (

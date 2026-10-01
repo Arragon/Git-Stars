@@ -35,6 +35,8 @@ export interface SavedRepository {
   aiTags: string[];
   addedAt: string;
   updatedAt: string;
+  /** Membership kinds from remote_memberships: "star" and/or "fork". */
+  kinds?: string[];
   repository: RepositoryProjection;
   tags: Array<{ id: string; name: string }>;
 }

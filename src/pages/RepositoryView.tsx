@@ -43,6 +43,7 @@ import {
   type MutationOutcome,
 } from "../data/offlineMutations";
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
+import { ActivityBadge } from "../components/ActivityBadge";
 
 type Tab = "readme" | "files" | "releases";
 
@@ -295,6 +296,7 @@ export const RepositoryView: React.FC = () => {
               </span>
               <span>forks {repo.forksCount}</span>
               {repo.primaryLanguage && <span>{repo.primaryLanguage}</span>}
+              <ActivityBadge owner={repo.namespacePath} repo={repo.name} />
               {repo.visibility === "private" && (
                 <span className="text-amber-600 dark:text-amber-400">
                   private
