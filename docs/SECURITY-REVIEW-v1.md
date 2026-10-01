@@ -35,10 +35,11 @@ claims were rejected.
     session behavior.
 - `npm run api:check` — contract valid (39 paths); the OpenAPI error-code catalog can
   only grow (diff gate).
-- Mimosa deep scan (2026-09-29): 0 High findings; 12 inconclusive "role/permission
-  check not statically observable" hypotheses — each route was verified to scope by
-  `user_id` (see A1/A2 below). Dependency advisory match: 5 packages / 36 offline
-  advisories — context-only; online review is External-Block (see E1).
+- Mimosa deep scan (2026-10-01, final): 0 High findings, verdictEffect none; 15
+  inconclusive "role/permission check not statically observable" hypotheses — each
+  route was verified to scope by `user_id` (see A1/A2 below). Dependency advisory
+  match: 5 packages / 36 offline advisories — context-only; online review is
+  External-Block (see E1).
 
 ## Surface review
 
