@@ -28,24 +28,20 @@ import { ApiError } from "../utils/api";
 import { signOutAndResetLocal } from "../utils/session";
 import { useTheme, type ThemePreference } from "../hooks/useTheme";
 import { useAuthStore } from "../store/useAuthStore";
-import { useAiConfigStore, type AiProvider } from "../store/useAiConfigStore";
+import { useAiConfigStore } from "../store/useAiConfigStore";
+import {
+  AI_PROVIDER_PRESETS,
+  AI_PROVIDER_GROUP_LABELS,
+  getPreset,
+  presetSupportsModelListing,
+  type AiProviderGroup,
+} from "../ai/providers";
+import { listAiModels, AiClientError } from "../ai/client";
 
 const msg = (e: unknown): string =>
   e instanceof ApiError ? `${e.code}: ${e.message}` : "操作失败，请重试";
 
-const PROVIDER_DEFAULTS: Record<AiProvider, { url: string; mod: string }> = {
-  openai: { url: "https://api.openai.com/v1", mod: "gpt-3.5-turbo" },
-  google: {
-    url: "https://generativelanguage.googleapis.com/v1beta",
-    mod: "gemini-pro",
-  },
-  claude: {
-    url: "https://api.anthropic.com/v1",
-    mod: "claude-3-haiku-20240307",
-  },
-  minimax: { url: "https://aigc.x-see.cn/v1", mod: "MiniMax-M2.5" },
-  custom: { url: "", mod: "" },
-};
+const AI_GROUP_ORDER: AiProviderGroup[] = ["international", "china", "relay"];
 
 const Section: React.FC<{
   icon: React.ReactNode;
@@ -71,14 +67,25 @@ const Section: React.FC<{
 
 const AiSettingsSection: React.FC = () => {
   const { config, setConfig } = useAiConfigStore();
-  const [provider, setProvider] = useState<AiProvider>(config.provider);
+  const [presetId, setPresetId] = useState(config.presetId);
   const [apiKey, setApiKey] = useState(config.apiKey);
   const [baseUrl, setBaseUrl] = useState(config.baseUrl);
   const [model, setModel] = useState(config.model);
   const [language, setLanguage] = useState(
     config.language || "Simplified Chinese",
   );
+  const [models, setModels] = useState<string[]>(config.fetchedModels ?? []);
+  const [modelsStatus, setModelsStatus] = useState<{
+    kind: "idle" | "loading" | "ok" | "error";
+    message?: string;
+  }>({ kind: "idle" });
   const [saved, setSaved] = useState(false);
+
+  const preset = getPreset(presetId);
+  const canListModels =
+    presetSupportsModelListing(presetId) &&
+    apiKey.trim().length > 0 &&
+    baseUrl.trim().length > 0;
 
   const apiKeyOk = apiKey.trim().length > 0;
   const baseUrlOk = baseUrl.trim().length > 0;
@@ -92,44 +99,82 @@ const AiSettingsSection: React.FC = () => {
         ? "Model 为必填项。"
         : "";
 
-  const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const next = e.target.value as AiProvider;
-    setProvider(next);
-    const defaults = PROVIDER_DEFAULTS[next];
-    if (defaults) {
-      setBaseUrl(defaults.url);
-      setModel(defaults.mod);
+  const handlePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const next = e.target.value;
+    setPresetId(next);
+    const nextPreset = getPreset(next);
+    if (nextPreset) {
+      // 厂商默认配置：Base URL 与默认模型自动填入，用户只需填 API Key。
+      setBaseUrl(nextPreset.baseUrl);
+      setModel(nextPreset.defaultModel);
+    }
+    setModels([]);
+    setModelsStatus({ kind: "idle" });
+  };
+
+  const handleFetchModels = async () => {
+    setModelsStatus({ kind: "loading" });
+    try {
+      const list = await listAiModels({ presetId, baseUrl, apiKey, model });
+      setModels(list);
+      setModelsStatus({
+        kind: "ok",
+        message: `获取成功，共 ${list.length} 个模型，可在 Model 下拉中选择。`,
+      });
+    } catch (err) {
+      const message =
+        err instanceof AiClientError
+          ? err.message
+          : "获取模型列表失败，请手动填写模型名。";
+      setModels([]);
+      setModelsStatus({ kind: "error", message });
     }
   };
 
   const handleSave = () => {
     if (!canSave) return;
-    setConfig({ provider, apiKey, baseUrl, model, language });
+    setConfig({
+      presetId,
+      apiKey,
+      baseUrl,
+      model,
+      language,
+      fetchedModels: models.length > 0 ? models : undefined,
+    });
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   };
+
+  const inputClass =
+    "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm dark:bg-gray-800 dark:text-gray-100";
 
   return (
     <Section
       icon={<Sparkles className="h-4 w-4 text-purple-500" />}
       title="AI 设置"
-      description="用于生成仓库摘要与标签。配置保存在本地浏览器，不会上传服务器。"
+      description="选择厂商后自动填入默认接口配置，通常只需填写 API Key。用于生成仓库摘要与标签。配置保存在本地浏览器，不会上传服务器。"
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block text-sm">
           <span className="block font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Provider
+            厂商 / 中转站
           </span>
           <select
-            value={provider}
-            onChange={handleProviderChange}
+            value={presetId}
+            onChange={handlePresetChange}
             className="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
           >
-            <option value="minimax">MiniMax (Test)</option>
-            <option value="openai">OpenAI</option>
-            <option value="google">Google Gemini</option>
-            <option value="claude">Claude</option>
-            <option value="custom">Custom (OpenAI Compatible)</option>
+            {AI_GROUP_ORDER.map((group) => (
+              <optgroup key={group} label={AI_PROVIDER_GROUP_LABELS[group]}>
+                {AI_PROVIDER_PRESETS.filter((p) => p.group === group).map(
+                  (p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ),
+                )}
+              </optgroup>
+            ))}
           </select>
         </label>
 
@@ -141,8 +186,9 @@ const AiSettingsSection: React.FC = () => {
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-..."
-            className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm dark:bg-gray-800 dark:text-gray-100"
+            placeholder={preset?.keyPlaceholder ?? "sk-..."}
+            autoComplete="off"
+            className={inputClass}
           />
         </label>
 
@@ -155,24 +201,42 @@ const AiSettingsSection: React.FC = () => {
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
             placeholder="https://api.openai.com/v1"
-            className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm dark:bg-gray-800 dark:text-gray-100"
+            className={inputClass}
           />
         </label>
 
-        <label className="block text-sm">
+        <div className="block text-sm">
           <span className="block font-medium text-gray-700 dark:text-gray-300 mb-1">
             Model
           </span>
-          <input
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="gpt-3.5-turbo"
-            className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm dark:bg-gray-800 dark:text-gray-100"
-          />
-        </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              list="ai-model-options"
+              placeholder={preset?.defaultModel || "模型名"}
+              className={inputClass}
+            />
+            <datalist id="ai-model-options">
+              {models.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+            {canListModels && (
+              <button
+                type="button"
+                onClick={() => void handleFetchModels()}
+                disabled={modelsStatus.kind === "loading"}
+                className="shrink-0 self-stretch px-3 rounded-md border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 text-xs whitespace-nowrap"
+              >
+                {modelsStatus.kind === "loading" ? "获取中..." : "获取模型列表"}
+              </button>
+            )}
+          </div>
+        </div>
 
-        <label className="block text-sm sm:col-span-2">
+        <label className="block text-sm">
           <span className="block font-medium text-gray-700 dark:text-gray-300 mb-1">
             Summary Language
           </span>
@@ -193,6 +257,27 @@ const AiSettingsSection: React.FC = () => {
           </select>
         </label>
       </div>
+
+      {preset?.hint && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {preset.hint}
+        </p>
+      )}
+      {!canListModels && !preset?.hint && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          该厂商未提供模型列表接口，请手动填写模型名。
+        </p>
+      )}
+      {modelsStatus.kind === "ok" && modelsStatus.message && (
+        <p className="text-xs text-green-700 dark:text-green-400">
+          {modelsStatus.message}
+        </p>
+      )}
+      {modelsStatus.kind === "error" && modelsStatus.message && (
+        <p className="text-xs text-red-600 dark:text-red-400">
+          {modelsStatus.message}
+        </p>
+      )}
 
       <div className="flex items-center gap-3">
         <button
