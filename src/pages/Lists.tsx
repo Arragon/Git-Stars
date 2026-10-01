@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowDown,
   ArrowUp,
   Download,
+  Pencil,
   Plus,
   Share2,
   Trash2,
@@ -11,8 +12,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  createList,
-  deleteList,
   exportList,
   getPublication,
   getList,
@@ -31,6 +30,21 @@ import {
   type SavedRepository,
 } from "../utils/gitstarsApi";
 import { ApiError } from "../utils/api";
+import {
+  addListItemOffline,
+  createListOffline,
+  deleteListOffline,
+  outcomeErrorLabel,
+  readListDetailCache,
+  readListsCache,
+  removeListItemOffline,
+  renameList,
+  upsertLibraryPage,
+  upsertListDetail,
+  upsertListSummaries,
+  type MutationOutcome,
+} from "../data/offlineMutations";
+import { useSyncStatusStore } from "../store/useSyncStatusStore";
 
 const msg = (e: unknown): string =>
   e instanceof ApiError
@@ -39,14 +53,22 @@ const msg = (e: unknown): string =>
       ? e.message
       : "Error";
 
+const isOffline = (): boolean =>
+  typeof navigator !== "undefined" && !navigator.onLine;
+
 export const Lists: React.FC = () => {
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [selected, setSelected] = useState<ListDetail | null>(null);
   const [library, setLibrary] = useState<SavedRepository[]>([]);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [loadingLists, setLoadingLists] = useState(true);
   const [importText, setImportText] = useState("");
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const isOnline = useSyncStatusStore((s) => s.isOnline);
+  const mountedRef = useRef(false);
 
   // Share / publication management (M5)
   const [shareTarget, setShareTarget] = useState<ListSummary | null>(null);
@@ -58,39 +80,132 @@ export const Lists: React.FC = () => {
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const reloadLists = useCallback(async () => {
+  /** Reflect the local cache into the list view (optimistic/offline state). */
+  const hydrateFromCache = useCallback(async () => {
     try {
-      setLists(await listLists());
-    } catch (e) {
-      setError(msg(e));
+      setLists(await readListsCache());
+    } catch {
+      // cache unavailable — server path still applies
     }
   }, []);
+
+  const reloadLists = useCallback(async () => {
+    try {
+      const fresh = await listLists();
+      setLists(fresh);
+      await upsertListSummaries(fresh);
+    } catch (e) {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        setNotice("离线：正在显示本地缓存");
+        await hydrateFromCache();
+      } else {
+        setError(msg(e));
+      }
+    } finally {
+      setLoadingLists(false);
+    }
+  }, [hydrateFromCache]);
+
+  // Stale-while-revalidate: paint the cached view immediately on first mount.
+  useEffect(() => {
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+    void hydrateFromCache();
+  }, [hydrateFromCache]);
 
   useEffect(() => {
     reloadLists();
     listLibrary()
-      .then(setLibrary)
-      .catch((e) => setError(msg(e)));
+      .then(async (lib) => {
+        setLibrary(lib);
+        try {
+          await upsertLibraryPage(lib);
+        } catch {
+          /* best-effort cache write */
+        }
+      })
+      .catch((e) => {
+        if (!isOffline()) setError(msg(e));
+      });
   }, [reloadLists]);
+
+  const hydrateSelectedFromCache = useCallback(async (listId: string) => {
+    try {
+      const cached = await readListDetailCache(listId);
+      if (cached) setSelected(cached);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const openList = async (id: string) => {
     try {
-      setSelected(await getList(id));
+      const detail = await getList(id);
+      setSelected(detail);
       setError("");
+      await upsertListDetail(detail);
     } catch (e) {
-      setError(msg(e));
+      if (isOffline()) {
+        await hydrateSelectedFromCache(id);
+      } else {
+        setError(msg(e));
+      }
     }
   };
 
+  /** Run an offline-capable mutation: refresh after confirm, hydrate otherwise. */
+  const runMutate = async <T,>(
+    fn: () => Promise<MutationOutcome<T>>,
+  ): Promise<MutationOutcome<T>> => {
+    setError("");
+    setNotice("");
+    const out = await fn();
+    if (out.error) setError(outcomeErrorLabel(out));
+    else if (!out.confirmed)
+      setNotice("离线：更改已保存到本地，联网后自动同步");
+    return out;
+  };
+
   const onCreate = async () => {
-    if (!name.trim()) return;
-    try {
-      const l = await createList(name.trim());
-      setName("");
+    if (!name.trim()) {
+      nameInputRef.current?.focus();
+      return;
+    }
+    const listName = name.trim();
+    setName("");
+    const out = await runMutate(() => createListOffline(listName));
+    await reloadLists();
+    if (out.confirmed && out.response) {
+      await openList(out.response.id);
+    } else {
+      await hydrateSelectedFromCache(out.entityId);
+    }
+  };
+
+  const onRename = async (list: ListSummary) => {
+    const next = window.prompt("重命名列表", list.name)?.trim();
+    if (!next || next === list.name) return;
+    await runMutate(() =>
+      renameList({ id: list.id, version: list.version }, next),
+    );
+    await reloadLists();
+    if (selected?.id === list.id) await hydrateSelectedFromCache(list.id);
+  };
+
+  const onDelete = async (list: ListSummary) => {
+    if (
+      !window.confirm(
+        `确定删除列表「${list.name}」？列表内的条目也会一并移除。`,
+      )
+    ) {
+      return;
+    }
+    const out = await runMutate(() =>
+      deleteListOffline({ id: list.id, version: list.version }),
+    );
+    if (!out.error) {
+      if (selected?.id === list.id) setSelected(null);
       await reloadLists();
-      await openList(l.id);
-    } catch (e) {
-      setError(msg(e));
     }
   };
 
@@ -100,10 +215,48 @@ export const Lists: React.FC = () => {
     reorder?: string[];
   }) => {
     if (!selected) return;
+    // Reorder is the only membership edit that cannot be expressed by the
+    // offline queue's replay encoding — keep it online-only.
+    if (payload.reorder) {
+      if (!isOnline) {
+        setError("离线状态暂不支持调整排序，请联网后重试");
+        return;
+      }
+      try {
+        const updated = await updateListItems(selected.id, payload);
+        setSelected(updated);
+        await upsertListDetail(updated);
+        await reloadLists();
+      } catch (e) {
+        setError(msg(e));
+      }
+      return;
+    }
+
+    let touched = false;
+    let allConfirmed = true;
     try {
-      const updated = await updateListItems(selected.id, payload);
-      setSelected(updated);
+      for (const savedId of payload.add ?? []) {
+        touched = true;
+        const out = await runMutate(() =>
+          addListItemOffline(selected.id, savedId),
+        );
+        if (out.confirmed && out.response) setSelected(out.response);
+        if (!out.confirmed) allConfirmed = false;
+      }
+      for (const savedId of payload.remove ?? []) {
+        touched = true;
+        const out = await runMutate(() =>
+          removeListItemOffline(selected.id, savedId),
+        );
+        if (out.confirmed && out.response) setSelected(out.response);
+        if (!out.confirmed) allConfirmed = false;
+      }
       await reloadLists();
+      if (touched && !allConfirmed) {
+        // Reflect the optimistic add/remove from the cache.
+        await hydrateSelectedFromCache(selected.id);
+      }
     } catch (e) {
       setError(msg(e));
     }
@@ -250,11 +403,16 @@ export const Lists: React.FC = () => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Lists</h1>
+    <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6 text-gray-900 dark:text-gray-100">
+      <h1 className="text-2xl font-bold">Lists</h1>
       {error && (
-        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+        <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
           {error}
+        </div>
+      )}
+      {notice && (
+        <div className="text-sm text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 rounded px-3 py-2">
+          {notice}
         </div>
       )}
 
@@ -262,76 +420,100 @@ export const Lists: React.FC = () => {
         <div className="space-y-3">
           <div className="flex gap-2">
             <input
-              className="flex-1 text-sm border border-gray-200 rounded px-3 py-2"
+              ref={nameInputRef}
+              className="flex-1 text-sm border border-gray-200 dark:border-gray-700 rounded px-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder-gray-400"
               placeholder="New list name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") onCreate();
+                if (e.key === "Enter") void onCreate();
               }}
             />
             <button
-              onClick={onCreate}
-              className="inline-flex items-center gap-1 bg-gray-900 text-white px-3 py-2 rounded text-sm"
+              onClick={() => void onCreate()}
+              className="inline-flex items-center gap-1 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white px-3 py-2 rounded text-sm"
             >
               <Plus className="h-4 w-4" /> Create
             </button>
           </div>
-          <ul className="space-y-2">
-            {lists.map((l) => (
-              <li
-                key={l.id}
-                className={`bg-white rounded-lg border p-3 flex items-center gap-2 ${selected?.id === l.id ? "border-gray-900" : "border-gray-200"}`}
-              >
-                <button
-                  onClick={() => openList(l.id)}
-                  className="flex-1 text-left"
+          {loadingLists && lists.length === 0 ? (
+            <ul className="space-y-2" aria-hidden="true">
+              {[0, 1, 2].map((i) => (
+                <li
+                  key={i}
+                  className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-3 animate-pulse"
                 >
-                  <div className="text-sm font-medium text-gray-900">
-                    {l.name}
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    {l.itemCount ?? 0} items
-                  </div>
-                </button>
-                <button
-                  onClick={() => void openShare(l)}
-                  className="text-gray-400 hover:text-gray-700"
-                  title="分享"
+                  <div className="h-4 w-1/3 bg-gray-200 dark:bg-gray-700 rounded mb-2" />
+                  <div className="h-3 w-1/4 bg-gray-100 dark:bg-gray-800 rounded" />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <ul className="space-y-2">
+              {lists.map((l) => (
+                <li
+                  key={l.id}
+                  className={`bg-white dark:bg-gray-900 rounded-lg border p-3 flex items-center gap-2 ${selected?.id === l.id ? "border-gray-900 dark:border-gray-100" : "border-gray-200 dark:border-gray-800"}`}
                 >
-                  <Share2 className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => onExport(l)}
-                  className="text-gray-400 hover:text-gray-700"
-                  title="Export"
-                >
-                  <Download className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={async () => {
-                    await deleteList(l.id);
-                    if (selected?.id === l.id) setSelected(null);
-                    await reloadLists();
-                  }}
-                  className="text-gray-400 hover:text-red-600"
-                  title="Delete"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </li>
-            ))}
-            {lists.length === 0 && (
-              <li className="text-sm text-gray-500">No lists yet.</li>
-            )}
-          </ul>
+                  <button
+                    onClick={() => void openList(l.id)}
+                    className="flex-1 text-left min-w-0"
+                  >
+                    <div className="text-sm font-medium truncate">{l.name}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {l.itemCount ?? 0} items
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => void onRename(l)}
+                    className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center shrink-0"
+                    title="重命名"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => void openShare(l)}
+                    className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center shrink-0"
+                    title="分享"
+                  >
+                    <Share2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => onExport(l)}
+                    className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center shrink-0"
+                    title="Export"
+                  >
+                    <Download className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => void onDelete(l)}
+                    className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 h-10 w-10 inline-flex items-center justify-center shrink-0"
+                    title="Delete"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+              {lists.length === 0 && !loadingLists && (
+                <li className="text-sm text-gray-500 dark:text-gray-400 py-6 text-center">
+                  还没有列表。
+                  <button
+                    onClick={() => void onCreate()}
+                    className="ml-1 text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    新建列表
+                  </button>
+                </li>
+              )}
+            </ul>
+          )}
 
-          <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-2">
-            <div className="text-sm font-medium text-gray-700 inline-flex items-center gap-1">
+          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-3 space-y-2">
+            <div className="text-sm font-medium text-gray-700 dark:text-gray-200 inline-flex items-center gap-1">
               <Upload className="h-4 w-4" /> Import a List
             </div>
             <textarea
-              className="w-full text-xs border border-gray-200 rounded p-2 font-mono"
+              className="w-full text-xs border border-gray-200 dark:border-gray-700 rounded p-2 font-mono bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder-gray-400"
               rows={4}
               placeholder="Paste a .gitstars-list JSON..."
               value={importText}
@@ -340,21 +522,21 @@ export const Lists: React.FC = () => {
             <div className="flex gap-2">
               <button
                 onClick={onPreview}
-                className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded"
+                className="text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 px-3 py-1.5 rounded"
               >
                 Preview
               </button>
               {preview && (
                 <button
                   onClick={onCommit}
-                  className="text-sm bg-gray-900 text-white px-3 py-1.5 rounded"
+                  className="text-sm bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white px-3 py-1.5 rounded"
                 >
                   Confirm import
                 </button>
               )}
             </div>
             {preview && (
-              <div className="text-xs text-gray-600 bg-gray-50 rounded p-2">
+              <div className="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded p-2">
                 <div className="font-medium">
                   “{preview.title}” — {preview.summary.total} items
                 </div>
@@ -368,16 +550,15 @@ export const Lists: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
           {selected ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-gray-900">
-                  {selected.name}
-                </h2>
+                <h2 className="text-lg font-semibold">{selected.name}</h2>
                 <button
                   onClick={() => setSelected(null)}
-                  className="text-gray-400 hover:text-gray-700"
+                  className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center"
+                  aria-label="关闭"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -386,52 +567,56 @@ export const Lists: React.FC = () => {
                 {selected.items.map((item, index) => (
                   <li
                     key={item.id}
-                    className="flex items-center gap-2 border border-gray-100 rounded px-2 py-1.5"
+                    className="flex items-center gap-1 border border-gray-100 dark:border-gray-800 rounded px-2 py-1"
                   >
-                    <span className="text-xs text-gray-400 w-4">
+                    <span className="text-xs text-gray-400 dark:text-gray-500 w-4">
                       {index + 1}
                     </span>
                     <Link
                       to={`/repository/${item.repository.id}`}
-                      className="flex-1 text-sm text-gray-800 hover:underline truncate"
+                      className="flex-1 text-sm hover:underline truncate min-w-0 py-2"
                     >
                       {item.repository.name}
                     </Link>
                     <button
                       onClick={() => move(index, -1)}
-                      className="text-gray-400 hover:text-gray-700"
+                      className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center shrink-0 disabled:opacity-30"
                       aria-label="Move up"
+                      disabled={index === 0}
                     >
-                      <ArrowUp className="h-3.5 w-3.5" />
+                      <ArrowUp className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => move(index, 1)}
-                      className="text-gray-400 hover:text-gray-700"
+                      className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center shrink-0 disabled:opacity-30"
                       aria-label="Move down"
+                      disabled={index === selected.items.length - 1}
                     >
-                      <ArrowDown className="h-3.5 w-3.5" />
+                      <ArrowDown className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() =>
                         mutateItems({ remove: [item.savedRepositoryId] })
                       }
-                      className="text-gray-400 hover:text-red-600"
+                      className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 h-10 w-10 inline-flex items-center justify-center shrink-0"
                       aria-label="Remove from list"
                     >
-                      <X className="h-3.5 w-3.5" />
+                      <X className="h-4 w-4" />
                     </button>
                   </li>
                 ))}
                 {selected.items.length === 0 && (
-                  <li className="text-sm text-gray-500">Empty list.</li>
+                  <li className="text-sm text-gray-500 dark:text-gray-400">
+                    Empty list.
+                  </li>
                 )}
               </ul>
-              <div className="border-t border-gray-100 pt-3">
-                <div className="text-xs text-gray-500 mb-1">
+              <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
                   Add from library
                 </div>
                 <select
-                  className="w-full text-sm border border-gray-200 rounded px-2 py-1.5"
+                  className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100"
                   defaultValue=""
                   onChange={(e) => {
                     const v = e.target.value;
@@ -456,7 +641,7 @@ export const Lists: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="text-sm text-gray-500 py-12 text-center">
+            <div className="text-sm text-gray-500 dark:text-gray-400 py-12 text-center">
               Select a list to view and edit its items.
             </div>
           )}
@@ -469,11 +654,11 @@ export const Lists: React.FC = () => {
           onClick={closeShare}
         >
           <div
-            className="bg-white rounded-lg border border-gray-200 w-full max-w-md p-4 space-y-3"
+            className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 w-full max-w-md p-4 space-y-3"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold text-gray-900">
+              <h3 className="text-base font-semibold">
                 分享「{shareTarget.name}」
               </h3>
               <button

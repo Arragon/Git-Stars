@@ -71,6 +71,7 @@ async function request<T>(
   }
 
   if (!response.ok) {
+    if (response.status === 401) handleUnauthorized(path);
     const errorBody = (data ?? {}) as ApiErrorResponse;
     throw new ApiError(
       errorBody.message || `HTTP ${response.status}`,
@@ -82,6 +83,20 @@ async function request<T>(
   }
 
   return data as T;
+}
+
+// 401 handling: an expired session anywhere in the app bounces the user back to
+// the entry page once. Auth endpoints are exempt (they legitimately answer 401),
+// and the redirect is guarded so a failing session endpoint cannot loop.
+let didRedirectOn401 = false;
+
+function handleUnauthorized(path: string): void {
+  if (path.startsWith("/api/auth/")) return;
+  if (didRedirectOn401) return;
+  if (typeof window === "undefined") return;
+  if (window.location.pathname === "/") return;
+  didRedirectOn401 = true;
+  window.location.href = "/";
 }
 
 export function apiGet<T>(path: string, options?: RequestOptions): Promise<T> {

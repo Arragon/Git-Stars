@@ -1,8 +1,10 @@
 // src/components/SyncStatusBar.tsx
-// Compact sync status indicator.
+// Compact sync status indicator. Clicking it toggles the global sync drawer
+// (pending mutations + conflicts).
 
 import React from "react";
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
+import { useSyncDrawerStore } from "../store/useSyncDrawerStore";
 import { Loader2 } from "lucide-react";
 
 export const SyncStatusBar: React.FC = () => {
@@ -14,6 +16,7 @@ export const SyncStatusBar: React.FC = () => {
     unresolvedConflictCount,
     pullError,
   } = useSyncStatusStore();
+  const toggleDrawer = useSyncDrawerStore((s) => s.toggle);
 
   // Determine display state (priority order)
   let dotColor: string;
@@ -49,20 +52,25 @@ export const SyncStatusBar: React.FC = () => {
   }
 
   return (
-    <div
-      className="flex items-center gap-1.5 text-xs text-gray-300"
-      role="status"
-      aria-live="polite"
-      title={label}
+    <button
+      onClick={toggleDrawer}
+      className="flex items-center gap-1.5 text-xs text-gray-300 hover:text-white rounded px-1.5 py-1 hover:bg-gray-800 transition-colors"
+      title={`${label}（点击查看同步详情）`}
     >
-      {!icon && (
-        <span
-          className={`inline-block w-2 h-2 rounded-full ${dotColor}`}
-          aria-hidden="true"
-        />
-      )}
-      {icon}
-      <span className="hidden sm:inline">{label}</span>
-    </div>
+      <span
+        role="status"
+        aria-live="polite"
+        className="flex items-center gap-1.5"
+      >
+        {!icon && (
+          <span
+            className={`inline-block w-2 h-2 rounded-full ${dotColor}`}
+            aria-hidden="true"
+          />
+        )}
+        {icon}
+        <span className="hidden sm:inline">{label}</span>
+      </span>
+    </button>
   );
 };

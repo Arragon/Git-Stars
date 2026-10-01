@@ -2,13 +2,13 @@ import React, { useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { Home } from "./pages/Home";
-import { Dashboard } from "./pages/Dashboard";
-import { ProjectDetail } from "./pages/ProjectDetail";
 import { Library } from "./pages/Library";
 import { RepositoryView } from "./pages/RepositoryView";
 import { Lists } from "./pages/Lists";
+import { Settings } from "./pages/Settings";
 import { Hub } from "./pages/Hub";
 import { PublicListPage } from "./pages/PublicListPage";
+import { NotFound } from "./pages/NotFound";
 import {
   useSyncStatusStore,
   startSyncStatusPolling,
@@ -84,12 +84,12 @@ function App() {
             <Route path="library" element={<Library />} />
             <Route path="repository/:id" element={<RepositoryView />} />
             <Route path="lists" element={<Lists />} />
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="project/:id" element={<ProjectDetail />} />
+            <Route path="settings" element={<Settings />} />
             {/* M5 public surfaces: render without a session (Layout exempts
                 /hub and /s/* from its anonymous redirect). */}
             <Route path="hub" element={<Hub />} />
             <Route path="s/:shareId" element={<PublicListPage />} />
+            <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>
       </SyncProvider>

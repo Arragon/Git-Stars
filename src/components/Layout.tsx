@@ -1,12 +1,12 @@
 import React, { useEffect } from "react";
 import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
 import { Github, LogOut } from "lucide-react";
-import { apiGet, apiPost } from "../utils/api";
+import { apiGet } from "../utils/api";
+import { signOutAndResetLocal } from "../utils/session";
 import { useAuthStore, SessionUser } from "../store/useAuthStore";
 import { SyncStatusBar } from "./SyncStatusBar";
 import { OfflineBanner } from "./OfflineBanner";
-import { localStore } from "../data";
-import { useSyncStatusStore } from "../store/useSyncStatusStore";
+import { SyncDrawer } from "./SyncDrawer";
 
 interface SessionResponse {
   user: SessionUser | null;
@@ -69,33 +69,22 @@ export const Layout: React.FC = () => {
   ]);
 
   const handleLogout = async () => {
-    try {
-      await apiPost("/api/auth/logout");
-    } catch (error) {
-      console.error("[Layout] Logout error:", error);
-    }
-    // Clear all user data from IndexedDB
-    try {
-      await localStore.clearUserState();
-    } catch (e) {
-      console.error("[Layout] Failed to clear local cache:", e);
-    }
-    // Reset sync status
-    useSyncStatusStore.getState().reset();
+    if (!window.confirm("确定退出登录？")) return;
+    await signOutAndResetLocal();
     setUser(null);
     navigate("/");
   };
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-gray-100"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
       <nav className="bg-gray-900 text-white shadow-sm flex-shrink-0 z-10 relative">
         <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
@@ -122,6 +111,12 @@ export const Layout: React.FC = () => {
                   </Link>
                   <Link to="/hub" className="text-gray-300 hover:text-white">
                     Hub
+                  </Link>
+                  <Link
+                    to="/settings"
+                    className="text-gray-300 hover:text-white"
+                  >
+                    Settings
                   </Link>
                 </nav>
                 <div className="flex items-center">
@@ -158,18 +153,21 @@ export const Layout: React.FC = () => {
 
       <OfflineBanner />
 
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-y-auto">
         <Outlet />
       </main>
 
-      <footer className="bg-white border-t border-gray-200 mt-auto">
+      <footer className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 mt-auto">
         <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-          <p className="text-center text-sm text-gray-500">
+          <p className="text-center text-sm text-gray-500 dark:text-gray-400">
             &copy; {new Date().getFullYear()} GitStars. Visualizing your GitHub
             stars and forks.
           </p>
         </div>
       </footer>
+
+      {/* Global sync drawer: pending mutations + conflicts, one instance. */}
+      <SyncDrawer />
     </div>
   );
 };

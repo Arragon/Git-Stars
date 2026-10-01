@@ -292,6 +292,23 @@ export interface ProviderAccount {
   scopes: string;
 }
 export const listProviders = () => apiGet<ProviderAccount[]>("/api/providers");
+export const revokeProvider = (providerType: string, host?: string) =>
+  apiPost<{ ok: boolean; revoked: number }>(
+    `/api/providers/${encodeURIComponent(providerType)}/revoke${host ? `?host=${encodeURIComponent(host)}` : ""}`,
+  );
+
+// Account ownership (INH-476): full data export + two-step deletion.
+export const exportAccountData = () => apiGet<unknown>("/api/account/export");
+export interface DeletionRequestResponse {
+  confirmation: string;
+  message: string;
+}
+export const requestAccountDeletion = () =>
+  apiPost<DeletionRequestResponse>("/api/account/delete");
+export const confirmAccountDeletion = (token: string) =>
+  apiPost<{ ok: boolean }>("/api/account/delete/confirm", {
+    confirmation: token,
+  });
 
 // Sharing & Hub (M5, INH-431/435/437/443). Publications are not synced user
 // state; these calls hit the sharing endpoints directly.
