@@ -191,7 +191,7 @@ export const PublicListPage: React.FC = () => {
         </div>
       )}
       {error && (
-        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+        <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
           {error}
         </div>
       )}

@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { autoCollectForList } from "../utils/autoCollect";
+import { Button, Notice, PageHeader } from "../components/ui";
 import {
   exportList,
   getPublication,
@@ -436,17 +437,12 @@ export const Lists: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6 text-gray-900 dark:text-gray-100">
-      <h1 className="text-2xl font-bold">Lists</h1>
-      {error && (
-        <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div className="text-sm text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 rounded px-3 py-2">
-          {notice}
-        </div>
-      )}
+      <PageHeader
+        title="Lists"
+        description="用列表组织收藏，支持导出、导入与公开分享"
+      />
+      {error && <Notice tone="error">{error}</Notice>}
+      {notice && <Notice tone="info">{notice}</Notice>}
 
       <div className="grid md:grid-cols-2 gap-6">
         <div className="space-y-3">
@@ -461,12 +457,9 @@ export const Lists: React.FC = () => {
                 if (e.key === "Enter") void onCreate();
               }}
             />
-            <button
-              onClick={() => void onCreate()}
-              className="inline-flex items-center gap-1 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white px-3 py-2 rounded text-sm"
-            >
+            <Button onClick={() => void onCreate()}>
               <Plus className="h-4 w-4" /> Create
-            </button>
+            </Button>
           </div>
           {loadingLists && lists.length === 0 ? (
             <ul className="space-y-2" aria-hidden="true">
@@ -559,12 +552,9 @@ export const Lists: React.FC = () => {
                 Preview
               </button>
               {preview && (
-                <button
-                  onClick={onCommit}
-                  className="text-sm bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white px-3 py-1.5 rounded"
-                >
+                <Button size="sm" onClick={onCommit}>
                   Confirm import
-                </button>
+                </Button>
               )}
             </div>
             {preview && (
@@ -717,7 +707,7 @@ export const Lists: React.FC = () => {
             </div>
 
             {shareError && (
-              <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+              <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
                 {shareError}
               </div>
             )}

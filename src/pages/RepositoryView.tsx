@@ -44,6 +44,7 @@ import {
 } from "../data/offlineMutations";
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
 import { ActivityBadge } from "../components/ActivityBadge";
+import { Button, Notice, Input } from "../components/ui";
 
 type Tab = "readme" | "files" | "releases";
 
@@ -239,15 +240,14 @@ export const RepositoryView: React.FC = () => {
               无法加载仓库
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">{error}</p>
-            <button
+            <Button
               onClick={() => {
                 setError("");
                 void load();
               }}
-              className="inline-flex items-center gap-1.5 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-300"
             >
               <RotateCw className="h-4 w-4" /> 重试
-            </button>
+            </Button>
           </div>
         </div>
       );
@@ -273,16 +273,8 @@ export const RepositoryView: React.FC = () => {
         <ArrowLeft className="h-4 w-4" /> Library
       </Link>
 
-      {error && (
-        <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div className="text-sm text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 rounded px-3 py-2">
-          {notice}
-        </div>
-      )}
+      {error && <Notice tone="error">{error}</Notice>}
+      {notice && <Notice tone="info">{notice}</Notice>}
 
       <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
         <div className="flex items-start justify-between gap-3">
@@ -318,7 +310,9 @@ export const RepositoryView: React.FC = () => {
             </a>
           </div>
           {repo.saved ? (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 if (!window.confirm("确定将该仓库从收藏移除？")) return;
                 void act(
@@ -331,12 +325,13 @@ export const RepositoryView: React.FC = () => {
                 );
               }}
               disabled={busy}
-              className="inline-flex items-center gap-1 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900 px-3 py-1.5 rounded text-sm shrink-0 disabled:opacity-50"
+              className="shrink-0 !bg-brand-50 dark:!bg-brand-500/10 !text-brand-700 dark:!text-brand-300 !border-brand-200 dark:!border-brand-500/30"
+              title="已收藏，点击移除"
             >
               <BookmarkCheck className="h-4 w-4" /> Saved
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
               onClick={() =>
                 void act(
                   () => saveRepositoryFromLibrary(repo.id),
@@ -355,17 +350,18 @@ export const RepositoryView: React.FC = () => {
               }
               disabled={busy || !isOnline}
               title={isOnline ? "收藏到我的库" : "离线状态暂不支持收藏"}
-              className="inline-flex items-center gap-1 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white px-3 py-1.5 rounded text-sm shrink-0 disabled:opacity-50"
+              className="shrink-0"
+              size="sm"
             >
               <Bookmark className="h-4 w-4" /> Save
-            </button>
+            </Button>
           )}
         </div>
 
         {repo.saved && (
           <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-3 space-y-2">
-            <input
-              className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder-gray-400"
+            <Input
+              className="py-1 text-sm"
               placeholder="Personal note..."
               defaultValue={repo.saved.note ?? ""}
               onBlur={(e) => {
