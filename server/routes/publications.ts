@@ -27,7 +27,11 @@ const PUBLISH_WINDOW_MS = 60 * 60 * 1000;
 
 export const publicationRoutes = new Hono<{ Variables: AuthedVariables }>();
 
-publicationRoutes.use("*", requireUser);
+// Scope the session requirement to THIS router's paths only: a wildcard `use`
+// here would leak into every /api route mounted after it (Hono composes
+// middleware by registration order), breaking the anonymous public/hub surface.
+publicationRoutes.use("/lists/:id/publication", requireUser);
+publicationRoutes.use("/lists/:id/hub", requireUser);
 
 publicationRoutes.post("/lists/:id/publication", async (c) => {
   const userId = c.get("userId");

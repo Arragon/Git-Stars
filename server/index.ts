@@ -68,18 +68,19 @@ app.use("/api/*", async (c, next) => {
   await next();
   const status = c.res.status;
   // `app` is an untyped Hono instance (mixed auth/anon routers): read the
-  // session-scoped variable through a typed context view.
+  // session-scoped variable through a typed context view. Anonymous requests
+  // have no userId — log them without a userRef.
   const userId = (c as unknown as Context<{ Variables: AuthedVariables }>).get(
     "userId",
   );
-  const userRefValue = userRef(userId);
+  const userRefValue = typeof userId === "string" ? userRef(userId) : undefined;
   logRequest({
     requestId: c.res.headers.get("X-Request-Id") ?? "",
     method: c.req.method,
     path: c.req.path,
     status,
     durationMs: Date.now() - start,
-    userRef: userRefValue,
+    ...(userRefValue ? { userRef: userRefValue } : {}),
   });
   if (status >= 400) {
     incrementMetric({

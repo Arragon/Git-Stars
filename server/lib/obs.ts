@@ -47,8 +47,8 @@ const TOKEN_PATTERNS: RegExp[] = [
   /\bgh[pousr]_[A-Za-z0-9]{16,}\b/g, // GitHub tokens
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, // fine-grained PATs
   /\bglpat-[A-Za-z0-9\-_]{16,}\b/g, // GitLab PATs
-  /\bghp_[A-Za-z0-9]{16,}\b/g,
-  /\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b/gi, // bare UUIDs (session values)
+  // NOTE: no bare-UUID pattern — request ids and entity ids are UUIDs and must
+  // stay correlated in logs; session cookie values are HMAC-signed, never bare.
 ];
 
 function scrubString(value: string): string {
