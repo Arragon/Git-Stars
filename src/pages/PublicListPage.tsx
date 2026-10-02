@@ -123,7 +123,7 @@ export const PublicListPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-4">
+      <div className="max-w-[990px] mx-auto px-4 sm:px-8 py-8 space-y-4">
         <div className="h-8 w-2/3 bg-gray-200 rounded animate-pulse" />
         <div className="h-4 w-1/2 bg-gray-100 rounded animate-pulse" />
         <div className="space-y-2 pt-4">
@@ -140,10 +140,10 @@ export const PublicListPage: React.FC = () => {
 
   if (gone || !snapshot) {
     return (
-      <div className="max-w-3xl mx-auto p-4 sm:p-6">
+      <div className="max-w-[990px] mx-auto px-4 sm:px-8 py-8">
         <div className="bg-white border border-gray-200 rounded-lg p-10 text-center space-y-3">
           <ShieldAlert className="h-10 w-10 text-gray-300 mx-auto" />
-          <h1 className="text-lg font-semibold text-gray-900">
+          <h1 className="text-lg font-semibold text-ink">
             此分享链接已失效或不存在
           </h1>
           <p className="text-sm text-gray-500">
@@ -157,7 +157,7 @@ export const PublicListPage: React.FC = () => {
   const unavailableCount = snapshot.repositoryCount - snapshot.availableCount;
 
   return (
-    <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-4">
+    <div className="max-w-[990px] mx-auto px-4 sm:px-8 py-8 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold text-gray-900 break-words">

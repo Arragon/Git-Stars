@@ -29,7 +29,7 @@ import { signOutAndResetLocal } from "../utils/session";
 import { useTheme, type ThemePreference } from "../hooks/useTheme";
 import { useAuthStore } from "../store/useAuthStore";
 import { useAiConfigStore } from "../store/useAiConfigStore";
-import { Notice } from "../components/ui";
+import { Notice, PageHeader } from "../components/ui";
 import {
   AI_PROVIDER_PRESETS,
   AI_PROVIDER_GROUP_LABELS,
@@ -428,9 +428,19 @@ const AppearanceSection: React.FC = () => {
   );
 };
 
+type SettingsTab = "appearance" | "ai" | "providers" | "account";
+
+const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
+  { id: "appearance", label: "外观" },
+  { id: "ai", label: "AI 设置" },
+  { id: "providers", label: "平台连接" },
+  { id: "account", label: "账户" },
+];
+
 export const Settings: React.FC = () => {
   const navigate = useNavigate();
   const { user, setUser } = useAuthStore();
+  const [tab, setTab] = useState<SettingsTab>("appearance");
 
   // Data export
   const [exporting, setExporting] = useState(false);
@@ -510,114 +520,139 @@ export const Settings: React.FC = () => {
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6 text-gray-900 dark:text-gray-100">
-      <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
-      {user && (
-        <p className="text-sm text-gray-500 dark:text-gray-400 -mt-3">
-          {user.full_name || user.username}
-        </p>
-      )}
+    <div className="p-4 sm:p-6 space-y-5 text-gray-900 dark:text-gray-100">
+      <PageHeader title="Settings" description="外观、AI、平台连接与账户管理" />
+      <div className="grid grid-cols-1 min-[721px]:grid-cols-[166px_minmax(0,860px)] gap-5 sm:gap-8 items-start">
+        <nav className="grid min-[721px]:sticky min-[721px]:top-[84px] gap-1 min-[721px]:grid-flow-row max-[720px]:grid-flow-col max-[720px]:overflow-auto">
+          {SETTINGS_TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              aria-current={tab === id ? "page" : undefined}
+              className={`flex items-center gap-2.5 px-3 py-2.5 text-[13px] rounded-[7px] text-left max-[720px]:whitespace-nowrap transition-colors ${
+                tab === id
+                  ? "bg-brand-soft text-brand-text font-semibold"
+                  : "text-muted hover:bg-subtle hover:text-ink"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div className="min-w-0 grid gap-5">
+          <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+          {user && (
+            <p className="text-sm text-gray-500 dark:text-gray-400 -mt-3">
+              {user.full_name || user.username}
+            </p>
+          )}
 
-      <AppearanceSection />
-      <AiSettingsSection />
-      <ProvidersSection />
+          {tab === "appearance" && <AppearanceSection />}
+          {tab === "ai" && <AiSettingsSection />}
+          {tab === "providers" && <ProvidersSection />}
 
-      <Section
-        icon={<User className="h-4 w-4 text-gray-500" />}
-        title="账户"
-        description="导出或删除你的全部数据。"
-      >
-        {exportError && (
-          <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
-            {exportError}
-          </div>
-        )}
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => void onExport()}
-            disabled={exporting}
-            className="inline-flex items-center gap-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 px-3 py-2 rounded disabled:opacity-50"
-          >
-            <Download className="h-4 w-4" />
-            {exporting ? "导出中..." : "导出数据"}
-          </button>
-          <span className="text-xs text-gray-500 dark:text-gray-400">
-            下载 JSON 格式的完整数据（收藏、备注、标签、列表、偏好设置）。
-          </span>
-        </div>
+          {tab === "account" && (
+            <Section
+              icon={<User className="h-4 w-4 text-gray-500" />}
+              title="账户"
+              description="导出或删除你的全部数据。"
+            >
+              {exportError && (
+                <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
+                  {exportError}
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={() => void onExport()}
+                  disabled={exporting}
+                  className="inline-flex items-center gap-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 px-3 py-2 rounded disabled:opacity-50"
+                >
+                  <Download className="h-4 w-4" />
+                  {exporting ? "导出中..." : "导出数据"}
+                </button>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  下载 JSON 格式的完整数据（收藏、备注、标签、列表、偏好设置）。
+                </span>
+              </div>
 
-        <div className="border border-red-200 dark:border-red-900 rounded p-3 space-y-3 bg-red-50/50 dark:bg-red-950/30">
-          <div className="flex items-center gap-2 text-sm font-medium text-red-700 dark:text-red-300">
-            <AlertTriangle className="h-4 w-4" /> 危险区
-          </div>
-          {!deletion ? (
-            <div className="flex flex-wrap items-center gap-3">
+              <div className="border border-red-200 dark:border-red-900 rounded p-3 space-y-3 bg-red-50/50 dark:bg-red-950/30">
+                <div className="flex items-center gap-2 text-sm font-medium text-red-700 dark:text-red-300">
+                  <AlertTriangle className="h-4 w-4" /> 危险区
+                </div>
+                {!deletion ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => void onRequestDeletion()}
+                      disabled={deleting}
+                      className="inline-flex items-center gap-1.5 text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded disabled:opacity-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {deleting ? "处理中..." : "删除账户"}
+                    </button>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      两步确认：先获取一次性令牌，输入后才会真正删除。
+                    </span>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="text-xs text-gray-600 dark:text-gray-300">
+                      已生成一次性确认令牌。请将它输入到下方输入框以确认删除（令牌仅显示一次）：
+                    </div>
+                    <code className="block text-xs bg-white dark:bg-gray-800 border border-red-200 dark:border-red-900 rounded p-2 break-all select-all font-mono text-red-700 dark:text-red-300">
+                      {deletion.confirmation}
+                    </code>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        value={deleteInput}
+                        onChange={(e) => setDeleteInput(e.target.value)}
+                        placeholder="粘贴确认令牌"
+                        className="flex-1 min-w-48 text-sm border border-gray-300 dark:border-gray-700 rounded px-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder-gray-400"
+                      />
+                      <button
+                        onClick={() => void onConfirmDeletion()}
+                        disabled={deleting || !deleteInput.trim()}
+                        className="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded disabled:opacity-50"
+                      >
+                        {deleting ? "删除中..." : "永久删除账户"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDeletion(null);
+                          setDeleteInput("");
+                          setDeleteError("");
+                        }}
+                        className="text-sm bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {deleteError && (
+                  <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
+                    {deleteError}
+                  </div>
+                )}
+              </div>
+            </Section>
+          )}
+
+          {tab === "account" && (
+            <Section
+              icon={<LogOut className="h-4 w-4 text-gray-500" />}
+              title="退出登录"
+            >
               <button
-                onClick={() => void onRequestDeletion()}
-                disabled={deleting}
-                className="inline-flex items-center gap-1.5 text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded disabled:opacity-50"
+                onClick={() => void onSignOut()}
+                className="text-sm bg-subtle hover:bg-subtle/70 px-3 py-2 rounded"
               >
-                <Trash2 className="h-4 w-4" />
-                {deleting ? "处理中..." : "删除账户"}
+                退出登录
               </button>
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                两步确认：先获取一次性令牌，输入后才会真正删除。
-              </span>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="text-xs text-gray-600 dark:text-gray-300">
-                已生成一次性确认令牌。请将它输入到下方输入框以确认删除（令牌仅显示一次）：
-              </div>
-              <code className="block text-xs bg-white dark:bg-gray-800 border border-red-200 dark:border-red-900 rounded p-2 break-all select-all font-mono text-red-700 dark:text-red-300">
-                {deletion.confirmation}
-              </code>
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  value={deleteInput}
-                  onChange={(e) => setDeleteInput(e.target.value)}
-                  placeholder="粘贴确认令牌"
-                  className="flex-1 min-w-48 text-sm border border-gray-300 dark:border-gray-700 rounded px-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder-gray-400"
-                />
-                <button
-                  onClick={() => void onConfirmDeletion()}
-                  disabled={deleting || !deleteInput.trim()}
-                  className="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded disabled:opacity-50"
-                >
-                  {deleting ? "删除中..." : "永久删除账户"}
-                </button>
-                <button
-                  onClick={() => {
-                    setDeletion(null);
-                    setDeleteInput("");
-                    setDeleteError("");
-                  }}
-                  className="text-sm bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded"
-                >
-                  取消
-                </button>
-              </div>
-            </div>
-          )}
-          {deleteError && (
-            <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
-              {deleteError}
-            </div>
+            </Section>
           )}
         </div>
-      </Section>
-
-      <Section
-        icon={<LogOut className="h-4 w-4 text-gray-500" />}
-        title="退出登录"
-      >
-        <button
-          onClick={() => void onSignOut()}
-          className="text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 px-3 py-2 rounded"
-        >
-          退出登录
-        </button>
-      </Section>
+      </div>
     </div>
   );
 };

@@ -100,11 +100,11 @@ export const CacheRecoveryScreen: React.FC = () => {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6 dark:bg-gray-950">
-      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-surface p-6 shadow-card">
+        <h1 className="text-lg font-semibold text-ink">
           {unsupported ? "本地缓存版本过新" : "本地缓存出现问题"}
         </h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+        <p className="mt-2 text-sm text-muted">
           {unsupported
             ? "本地缓存由更新版本的 GitStars 写入，当前应用无法读取。请升级应用，或重置本地缓存。"
             : "本地缓存无法读取或已损坏，需要重置后重新同步。"}{" "}
@@ -124,7 +124,7 @@ export const CacheRecoveryScreen: React.FC = () => {
             <button
               type="button"
               onClick={() => void handleExport()}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+              className="w-full rounded-lg border border-line-strong px-4 py-2 text-sm font-medium text-ink hover:bg-subtle"
             >
               导出未同步的修改（JSON）
             </button>
