@@ -1,19 +1,23 @@
 // src/pages/Settings.tsx
-// Account settings: appearance (theme), AI configuration, provider
-// connections, data export / account deletion and sign-out.
+// Pixel-faithful port of the prototype `settings()` (settings-layout +
+// settings-nav + settings-panel sections): appearance, AI configuration,
+// provider connections, sync/cache state and data/account management.
+// All handler logic (AI store, provider revoke/sync, export, two-step account
+// deletion, sign-out) is preserved from the previous implementation.
 
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  AlertTriangle,
   Check,
   Download,
-  LogOut,
-  Palette,
-  Plug,
+  Eye,
+  EyeOff,
+  List,
+  Monitor,
+  RefreshCw,
   Sparkles,
+  Sun,
   Trash2,
-  User,
 } from "lucide-react";
 import {
   confirmAccountDeletion,
@@ -21,6 +25,7 @@ import {
   listProviders,
   requestAccountDeletion,
   revokeProvider,
+  syncProvider,
   type DeletionRequestResponse,
   type ProviderAccount,
 } from "../utils/gitstarsApi";
@@ -29,7 +34,9 @@ import { signOutAndResetLocal } from "../utils/session";
 import { useTheme, type ThemePreference } from "../hooks/useTheme";
 import { useAuthStore } from "../store/useAuthStore";
 import { useAiConfigStore } from "../store/useAiConfigStore";
-import { Notice, PageHeader } from "../components/ui";
+import { useSyncStatusStore } from "../store/useSyncStatusStore";
+import { useSyncDrawerStore } from "../store/useSyncDrawerStore";
+import { useToastStore } from "../store/useToastStore";
 import {
   AI_PROVIDER_PRESETS,
   AI_PROVIDER_GROUP_LABELS,
@@ -44,26 +51,199 @@ const msg = (e: unknown): string =>
 
 const AI_GROUP_ORDER: AiProviderGroup[] = ["international", "china", "relay"];
 
-const Section: React.FC<{
-  icon: React.ReactNode;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}> = ({ icon, title, description, children }) => (
-  <section className="bg-surface rounded-lg border border-line p-4 sm:p-5 space-y-4">
-    <div>
-      <h2 className="text-base font-semibold text-ink inline-flex items-center gap-2">
-        {icon}
-        {title}
-      </h2>
-      {description && <p className="text-xs text-muted mt-1">{description}</p>}
+const DEFAULT_VIEW_KEY = "gitstars-default-view";
+
+function GitHubGlyph({ className = "ico large" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path
+        d="M9 20c-5 1-5-2-7-3m14 5v-4a3.5 3.5 0 0 0-1-2.8c3.4-.4 7-1.7 7-7.3a5.5 5.5 0 0 0-1.5-3.8A5 5 0 0 0 20 0s-1.3-.4-4 1.5a13 13 0 0 0-8 0C5.3-.4 4 0 4 0a5 5 0 0 0-.5 3.1A5.5 5.5 0 0 0 2 6.9c0 5.6 3.6 6.9 7 7.3A3.5 3.5 0 0 0 8 17v5"
+        transform="translate(0 1) scale(.95)"
+      />
+    </svg>
+  );
+}
+
+function CodeGlyph({ className = "ico" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path d="m8 6-6 6 6 6m8-12 6 6-6 6m-2-15-4 18" />
+    </svg>
+  );
+}
+
+function SyncGlyph({ className = "ico" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path d="M20 7A8 8 0 0 0 6 5L3 8m0-5v5h5M4 17a8 8 0 0 0 14 2l3-3m0 5v-5h-5" />
+    </svg>
+  );
+}
+
+function AiGlyph({ className = "ico" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5ZM20 2v4M18 4h4" />
+    </svg>
+  );
+}
+
+function ShieldGlyph({ className = "ico" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path d="m12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6ZM8 12l3 3 5-6" />
+    </svg>
+  );
+}
+
+function SunGlyph({ className = "ico" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5" />
+    </svg>
+  );
+}
+
+function MoonGlyph({ className = "ico" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path d="M20 14A9 9 0 0 1 10 3a9 9 0 1 0 10 11Z" />
+    </svg>
+  );
+}
+
+// --- 外观 -------------------------------------------------------------------
+
+const ThemePreview: React.FC<{ t: string }> = ({ t }) => (
+  <div className={`theme-preview ${t}`}>
+    <div className="mini-side">
+      <span />
+      <span />
+      <span />
     </div>
-    {children}
-  </section>
+    <div className="mini-main">
+      <span />
+      <span />
+      <span />
+    </div>
+  </div>
 );
+
+const AppearanceSection: React.FC = () => {
+  const { theme, setTheme } = useTheme();
+  const showToast = useToastStore((s) => s.showToast);
+  const [defaultView, setDefaultView] = useState<"grid" | "list">(() => {
+    try {
+      const saved = localStorage.getItem(DEFAULT_VIEW_KEY);
+      return saved === "list" ? "list" : "grid";
+    } catch {
+      return "grid";
+    }
+  });
+
+  const options: Array<{
+    value: ThemePreference;
+    label: string;
+    icon: React.ReactNode;
+  }> = [
+    { value: "light", label: "浅色", icon: <SunGlyph className="ico small" /> },
+    { value: "dark", label: "深色", icon: <MoonGlyph className="ico small" /> },
+    {
+      value: "system",
+      label: "跟随系统",
+      icon: <Monitor className="ico small" />,
+    },
+  ];
+
+  const applyDefaultView = (v: "grid" | "list") => {
+    setDefaultView(v);
+    try {
+      localStorage.setItem(DEFAULT_VIEW_KEY, v);
+    } catch {
+      // ignore persistence failures
+    }
+    showToast("默认浏览方式已保存");
+  };
+
+  return (
+    <>
+      <div className="settings-section">
+        <h2>外观</h2>
+        <p>选择适合当前环境的主题。主题偏好保存在这个浏览器中。</p>
+        <div className="theme-options">
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              className={`theme-option ${theme === opt.value ? "active" : ""}`}
+              aria-pressed={theme === opt.value}
+              onClick={() => {
+                setTheme(opt.value);
+                showToast("主题偏好已更新");
+              }}
+            >
+              <ThemePreview t={opt.value} />
+              <span className="row between">
+                {opt.label}
+                {theme === opt.value ? (
+                  <Check className="ico small" />
+                ) : (
+                  opt.icon
+                )}
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="setting-row mt16">
+          <div>
+            <h3>默认浏览方式</h3>
+            <p>卡片适合扫览，列表适合快速检索。</p>
+          </div>
+          <div className="segmented" role="group" aria-label="默认浏览方式">
+            {(
+              [
+                ["grid", "卡片"],
+                ["list", "列表"],
+              ] as const
+            ).map(([v, l]) => (
+              <button
+                key={v}
+                type="button"
+                className={defaultView === v ? "active" : ""}
+                aria-pressed={defaultView === v}
+                onClick={() => applyDefaultView(v)}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="settings-section">
+        <h3>键盘快捷操作</h3>
+        <div className="setting-row">
+          <span className="small muted">搜索与快捷跳转</span>
+          <kbd>⌘ / Ctrl K</kbd>
+        </div>
+        <div className="setting-row">
+          <span className="small muted">聚焦收藏库搜索</span>
+          <kbd>/</kbd>
+        </div>
+        <div className="setting-row">
+          <span className="small muted">关闭弹窗与面板</span>
+          <kbd>Esc</kbd>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// --- AI 设置 -----------------------------------------------------------------
 
 const AiSettingsSection: React.FC = () => {
   const { config, setConfig } = useAiConfigStore();
+  const showToast = useToastStore((s) => s.showToast);
   const [presetId, setPresetId] = useState(config.presetId);
   const [apiKey, setApiKey] = useState(config.apiKey);
   const [baseUrl, setBaseUrl] = useState(config.baseUrl);
@@ -71,30 +251,19 @@ const AiSettingsSection: React.FC = () => {
   const [language, setLanguage] = useState(
     config.language || "Simplified Chinese",
   );
+  const [showKey, setShowKey] = useState(false);
   const [models, setModels] = useState<string[]>(config.fetchedModels ?? []);
   const [modelsStatus, setModelsStatus] = useState<{
     kind: "idle" | "loading" | "ok" | "error";
     message?: string;
   }>({ kind: "idle" });
-  const [saved, setSaved] = useState(false);
+  const [validation, setValidation] = useState("");
 
   const preset = getPreset(presetId);
   const canListModels =
     presetSupportsModelListing(presetId) &&
     apiKey.trim().length > 0 &&
     baseUrl.trim().length > 0;
-
-  const apiKeyOk = apiKey.trim().length > 0;
-  const baseUrlOk = baseUrl.trim().length > 0;
-  const modelOk = model.trim().length > 0;
-  const canSave = apiKeyOk && baseUrlOk && modelOk;
-  const validationMessage = !apiKeyOk
-    ? "API Key 为必填项。"
-    : !baseUrlOk
-      ? "Base URL 为必填项。"
-      : !modelOk
-        ? "Model 为必填项。"
-        : "";
 
   const handlePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const next = e.target.value;
@@ -116,7 +285,7 @@ const AiSettingsSection: React.FC = () => {
       setModels(list);
       setModelsStatus({
         kind: "ok",
-        message: `获取成功，共 ${list.length} 个模型，可在 Model 下拉中选择。`,
+        message: `获取成功，共 ${list.length} 个模型，可在模型下拉中选择。`,
       });
     } catch (err) {
       const message =
@@ -128,8 +297,23 @@ const AiSettingsSection: React.FC = () => {
     }
   };
 
-  const handleSave = () => {
-    if (!canSave) return;
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    const apiKeyOk = apiKey.trim().length > 0;
+    const baseUrlOk = baseUrl.trim().length > 0;
+    const modelOk = model.trim().length > 0;
+    if (!apiKeyOk || !baseUrlOk || !modelOk) {
+      setValidation("请填写 API Key、Base URL 和模型名。");
+      return;
+    }
+    try {
+      const u = new URL(baseUrl);
+      if (!["http:", "https:"].includes(u.protocol)) throw new Error();
+    } catch {
+      setValidation("请使用有效的 HTTP 或 HTTPS 地址。");
+      return;
+    }
+    setValidation("");
     setConfig({
       presetId,
       apiKey,
@@ -138,165 +322,183 @@ const AiSettingsSection: React.FC = () => {
       language,
       fetchedModels: models.length > 0 ? models : undefined,
     });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    showToast("AI 配置已保存");
   };
 
-  const inputClass =
-    "mt-1 block w-full px-3 py-2 border border-line-strong rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm";
-
   return (
-    <Section
-      icon={<Sparkles className="h-4 w-4 text-purple-500" />}
-      title="AI 设置"
-      description="选择厂商后自动填入默认接口配置，通常只需填写 API Key。用于生成仓库摘要与标签。配置保存在本地浏览器，不会上传服务器。"
-    >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block text-sm">
-          <span className="block font-medium text-ink mb-1">厂商 / 中转站</span>
-          <select
-            value={presetId}
-            onChange={handlePresetChange}
-            className="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-line-strong focus:outline-none focus:border-[var(--c-focus)] rounded-md"
-          >
-            {AI_GROUP_ORDER.map((group) => (
-              <optgroup key={group} label={AI_PROVIDER_GROUP_LABELS[group]}>
-                {AI_PROVIDER_PRESETS.filter((p) => p.group === group).map(
-                  (p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ),
-                )}
-              </optgroup>
-            ))}
-          </select>
-        </label>
-
-        <label className="block text-sm">
-          <span className="block font-medium text-ink mb-1">API Key</span>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder={preset?.keyPlaceholder ?? "sk-..."}
-            autoComplete="off"
-            className={inputClass}
-          />
-        </label>
-
-        <label className="block text-sm">
-          <span className="block font-medium text-ink mb-1">Base URL</span>
-          <input
-            type="text"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://api.openai.com/v1"
-            className={inputClass}
-          />
-        </label>
-
-        <div className="block text-sm">
-          <span className="block font-medium text-ink mb-1">Model</span>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              list="ai-model-options"
-              placeholder={preset?.defaultModel || "模型名"}
-              className={inputClass}
-            />
-            <datalist id="ai-model-options">
-              {models.map((m) => (
-                <option key={m} value={m} />
+    <form onSubmit={handleSave}>
+      <div className="settings-section">
+        <div className="row gap8">
+          <AiGlyph />
+          <h2>AI 设置</h2>
+          <span className="badge violet">浏览器本地</span>
+        </div>
+        <p>按需生成仓库摘要与类别标签。选择厂商后，再填写对应的 API Key。</p>
+        <div className="form-grid">
+          <label className="field-label">
+            厂商 / 服务
+            <select
+              className="field"
+              value={presetId}
+              onChange={handlePresetChange}
+            >
+              {AI_GROUP_ORDER.map((group) => (
+                <optgroup key={group} label={AI_PROVIDER_GROUP_LABELS[group]}>
+                  {AI_PROVIDER_PRESETS.filter((p) => p.group === group).map(
+                    (p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ),
+                  )}
+                </optgroup>
               ))}
-            </datalist>
-            {canListModels && (
+            </select>
+          </label>
+          <label className="field-label">
+            API Key
+            <span className="key-wrap">
+              <input
+                className="field"
+                type={showKey ? "text" : "password"}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={preset?.keyPlaceholder ?? "sk-..."}
+                autoComplete="off"
+                spellCheck={false}
+              />
               <button
                 type="button"
-                onClick={() => void handleFetchModels()}
-                disabled={modelsStatus.kind === "loading"}
-                className="shrink-0 self-stretch px-3 rounded-md border border-line-strong text-ink hover:bg-subtle disabled:opacity-50 text-xs whitespace-nowrap"
+                className="btn icon ghost"
+                aria-label={showKey ? "隐藏 API Key" : "显示 API Key"}
+                onClick={() => setShowKey((v) => !v)}
               >
-                {modelsStatus.kind === "loading" ? "获取中..." : "获取模型列表"}
+                {showKey ? <EyeOff className="ico" /> : <Eye className="ico" />}
               </button>
-            )}
-          </div>
+            </span>
+            <span className="hint">
+              仅保存在当前浏览器，不会上传到 GitStars 服务器。
+            </span>
+          </label>
+          <label className="field-label">
+            Base URL
+            <input
+              className="field"
+              type="text"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="https://api.openai.com/v1"
+              spellCheck={false}
+            />
+          </label>
+          <label className="field-label">
+            模型
+            <span className="key-wrap">
+              <input
+                className="field"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                list="ai-model-options"
+                placeholder={preset?.defaultModel || "模型名"}
+                spellCheck={false}
+              />
+              <datalist id="ai-model-options">
+                {models.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+              {canListModels && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={modelsStatus.kind === "loading"}
+                  onClick={() => void handleFetchModels()}
+                >
+                  <RefreshCw className="ico small" />
+                  {modelsStatus.kind === "loading" ? "获取中…" : "获取列表"}
+                </button>
+              )}
+            </span>
+            <span className="hint">支持手动填写模型名。</span>
+          </label>
+          <label className="field-label">
+            摘要语言
+            <select
+              className="field"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+            >
+              <option value="Simplified Chinese">
+                简体中文 (Simplified Chinese)
+              </option>
+              <option value="Traditional Chinese">
+                繁体中文 (Traditional Chinese)
+              </option>
+              <option value="English">English</option>
+              <option value="Japanese">日本語 (Japanese)</option>
+              <option value="Korean">한국어 (Korean)</option>
+            </select>
+          </label>
         </div>
-
-        <label className="block text-sm">
-          <span className="block font-medium text-ink mb-1">
-            Summary Language
-          </span>
-          <select
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-            className="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-line-strong focus:outline-none focus:border-[var(--c-focus)] rounded-md"
+        {preset?.hint && <p className="small muted mt16">{preset.hint}</p>}
+        {modelsStatus.kind === "ok" && modelsStatus.message && (
+          <p
+            className="small mt8"
+            style={{ color: "var(--brand-text)" }}
+            role="status"
           >
-            <option value="Simplified Chinese">
-              简体中文 (Simplified Chinese)
-            </option>
-            <option value="Traditional Chinese">
-              繁体中文 (Traditional Chinese)
-            </option>
-            <option value="English">English</option>
-            <option value="Japanese">日本語 (Japanese)</option>
-            <option value="Korean">한국어 (Korean)</option>
-          </select>
-        </label>
-      </div>
-
-      {preset?.hint && <p className="text-xs text-muted">{preset.hint}</p>}
-      {!canListModels && !preset?.hint && (
-        <p className="text-xs text-muted">
-          该厂商未提供模型列表接口，请手动填写模型名。
-        </p>
-      )}
-      {modelsStatus.kind === "ok" && modelsStatus.message && (
-        <p className="text-xs text-green-700 dark:text-green-400">
-          {modelsStatus.message}
-        </p>
-      )}
-      {modelsStatus.kind === "error" && modelsStatus.message && (
-        <p className="text-xs text-red-600 dark:text-red-400">
-          {modelsStatus.message}
-        </p>
-      )}
-
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={!canSave}
-          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white ${
-            canSave
-              ? "bg-blue-600 hover:bg-blue-700"
-              : "bg-subtle cursor-not-allowed"
-          }`}
-        >
-          {saved ? (
-            <>
-              <Check className="h-4 w-4" /> 已保存
-            </>
-          ) : (
-            "保存配置"
-          )}
-        </button>
-        {!canSave && validationMessage && (
-          <span className="text-xs text-red-600 dark:text-red-400">
-            {validationMessage}
-          </span>
+            {modelsStatus.message}
+          </p>
         )}
+        {modelsStatus.kind === "error" && modelsStatus.message && (
+          <p
+            className="small mt8"
+            style={{ color: "var(--red)" }}
+            role="status"
+          >
+            {modelsStatus.message}
+          </p>
+        )}
+        {validation && (
+          <p
+            className="small mt16"
+            style={{ color: "var(--red)" }}
+            role="status"
+          >
+            {validation}
+          </p>
+        )}
+        <div className="form-actions">
+          <span className="small">配置变更后需保存。</span>
+          <button className="btn primary" type="submit">
+            <Check className="ico" />
+            保存配置
+          </button>
+        </div>
       </div>
-    </Section>
+      <div className="settings-section">
+        <h3>生成摘要时会发送哪些内容？</h3>
+        <p>
+          仓库名称、描述、主要语言与已有标签会发送给所选模型服务。备注与账号凭据不参与摘要生成。
+        </p>
+        <p className="small mt8">
+          AI Key 按现有实现保存在当前浏览器；设备之间不会自动共享。
+        </p>
+      </div>
+    </form>
   );
 };
+
+// --- 平台连接 -----------------------------------------------------------------
 
 const ProvidersSection: React.FC = () => {
   const [providers, setProviders] = useState<ProviderAccount[] | null>(null);
   const [error, setError] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const isOnline = useSyncStatusStore((s) => s.isOnline);
+  const showToast = useToastStore((s) => s.showToast);
+  const user = useAuthStore((s) => s.user);
 
   const reload = useCallback(async () => {
     try {
@@ -323,6 +525,7 @@ const ProvidersSection: React.FC = () => {
     try {
       await revokeProvider(p.providerType, p.host);
       await reload();
+      showToast("连接已解除");
     } catch (e) {
       setError(msg(e));
     } finally {
@@ -330,97 +533,173 @@ const ProvidersSection: React.FC = () => {
     }
   };
 
+  const onSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setError("");
+    try {
+      const res = await syncProvider("github");
+      showToast(
+        res.counts ? `同步完成：${res.counts.repositories} 个仓库` : "同步完成",
+      );
+    } catch (e) {
+      setError(msg(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
-    <Section
-      icon={<Plug className="h-4 w-4 text-green-600" />}
-      title="Provider 连接"
-      description="已连接的代码托管平台账号。撤销后需要重新授权才能同步。"
-    >
-      {error && <Notice tone="error">{error}</Notice>}
-      {providers === null ? (
-        <div className="text-sm text-muted py-2">加载中...</div>
-      ) : providers.length === 0 ? (
-        <div className="text-sm text-muted py-2">暂无已连接的 Provider。</div>
-      ) : (
-        <ul className="space-y-2">
-          {providers.map((p) => (
-            <li
+    <>
+      <div className="settings-section">
+        <h2>平台连接</h2>
+        <p>代码托管平台的授权与同步状态。</p>
+        {error && (
+          <div className="notice error mt16" role="alert">
+            <span className="grow">{error}</span>
+          </div>
+        )}
+        {providers === null ? (
+          <p className="muted small mt16">加载中…</p>
+        ) : providers.length === 0 ? (
+          <p className="muted small mt16">暂无已连接的平台。</p>
+        ) : (
+          providers.map((p) => (
+            <div
+              className="provider-row"
               key={`${p.providerType}:${p.host}:${p.remoteUserId}`}
-              className="flex items-center justify-between gap-3 border border-line rounded px-3 py-2"
             >
-              <div className="min-w-0">
-                <div className="text-sm font-medium flex items-center gap-2">
-                  <span className="uppercase">{p.providerType}</span>
-                  <span className="text-green-600 dark:text-green-400 text-xs">
-                    已连接
-                  </span>
+              <span className="provider-symbol">
+                <GitHubGlyph />
+              </span>
+              <div className="grow">
+                <div className="row gap8">
+                  <h3>GitHub</h3>
+                  <span className="badge green">已连接</span>
                 </div>
-                <div className="text-xs text-muted truncate">
-                  {p.remoteUsername} @{p.host} · scopes: {p.scopes || "—"}
-                </div>
+                <p className="muted small mt8">
+                  {p.remoteUsername} · {p.host}
+                </p>
               </div>
               <button
-                onClick={() => void onRevoke(p)}
+                type="button"
+                className="btn danger sm"
                 disabled={busyKey === `${p.providerType}:${p.host}`}
-                className="text-sm text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900 hover:bg-red-50 dark:hover:bg-red-950/50 px-3 py-1.5 rounded disabled:opacity-50 shrink-0"
+                onClick={() => void onRevoke(p)}
               >
                 {busyKey === `${p.providerType}:${p.host}`
-                  ? "处理中..."
+                  ? "处理中…"
                   : "解除连接"}
               </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Section>
-  );
-};
-
-const AppearanceSection: React.FC = () => {
-  const { theme, setTheme } = useTheme();
-  const options: Array<{ value: ThemePreference; label: string }> = [
-    { value: "light", label: "浅色" },
-    { value: "dark", label: "深色" },
-    { value: "system", label: "跟随系统" },
-  ];
-  return (
-    <Section
-      icon={<Palette className="h-4 w-4 text-blue-500" />}
-      title="外观"
-      description="选择界面的配色主题。"
-    >
-      <div className="inline-flex bg-subtle p-1 rounded-lg">
-        {options.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => setTheme(opt.value)}
-            className={`flex-1 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-              theme === opt.value
-                ? "bg-surface text-ink shadow-sm"
-                : "text-muted hover:text-gray-700 dark:hover:text-gray-200"
-            }`}
-          >
-            {opt.label}
-          </button>
+            </div>
+          ))
+        )}
+        {["GitLab", "Gitee"].map((p) => (
+          <div className="provider-row" key={p}>
+            <span className="provider-symbol">
+              <CodeGlyph />
+            </span>
+            <div className="grow">
+              <h3>{p}</h3>
+              <p className="muted small mt8">当前版本尚未开放真实连接。</p>
+            </div>
+            <span className="badge">尚未支持</span>
+          </div>
         ))}
       </div>
-    </Section>
+      <div className="settings-section">
+        <h3>同步你的收藏</h3>
+        <p>
+          GitHub 同步会拉取该平台的 Star 与 Fork。整理到 GitStars
+          的列表与个人备注由 GitStars 管理。
+        </p>
+        <div className="form-actions">
+          <span className="small">
+            {user?.last_synced_at
+              ? `上次同步 · ${new Date(user.last_synced_at).toLocaleString()}`
+              : "尚未同步过"}
+          </span>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!isOnline || syncing}
+            title={!isOnline ? "此操作需要联网" : undefined}
+            onClick={() => void onSync()}
+          >
+            <SyncGlyph className="ico" />
+            {syncing ? "同步中…" : "同步 GitHub"}
+          </button>
+        </div>
+      </div>
+    </>
   );
 };
 
-type SettingsTab = "appearance" | "ai" | "providers" | "account";
+// --- 同步与缓存 ----------------------------------------------------------------
 
-const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
-  { id: "appearance", label: "外观" },
-  { id: "ai", label: "AI 设置" },
-  { id: "providers", label: "平台连接" },
-  { id: "account", label: "账户" },
-];
+const SyncSection: React.FC = () => {
+  const { isOnline, pendingMutationCount, unresolvedConflictCount } =
+    useSyncStatusStore();
+  const toggleSyncDrawer = useSyncDrawerStore((s) => s.toggle);
 
-export const Settings: React.FC = () => {
+  return (
+    <div className="settings-section">
+      <h2>同步与本地状态</h2>
+      <p>查看待上传修改与同步冲突，并在同步抽屉中处理它们。</p>
+      <div className="setting-row mt16">
+        <div>
+          <h3>连接状态</h3>
+          <p>
+            {isOnline
+              ? "连接正常，收藏与列表会自动保持同步。"
+              : "当前离线，可继续整理缓存中的收藏。"}
+          </p>
+        </div>
+        <span className={`badge ${isOnline ? "green" : "amber"}`}>
+          {isOnline ? "在线" : "离线"}
+        </span>
+      </div>
+      <div className="setting-row">
+        <div>
+          <h3>待同步修改</h3>
+          <p>
+            {pendingMutationCount
+              ? `${pendingMutationCount} 条更改已保存在本地。`
+              : "本地修改已经同步。"}
+          </p>
+        </div>
+        <button type="button" className="btn sm" onClick={toggleSyncDrawer}>
+          <List className="ico small" />
+          查看队列
+        </button>
+      </div>
+      <div className="setting-row">
+        <div>
+          <h3>需要处理的冲突</h3>
+          <p>
+            {unresolvedConflictCount
+              ? `${unresolvedConflictCount} 条冲突待处理，可在同步抽屉中查看差异。`
+              : "没有待处理的冲突。"}
+          </p>
+        </div>
+        <button type="button" className="btn sm" onClick={toggleSyncDrawer}>
+          查看冲突
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// --- 数据与账户 -----------------------------------------------------------------
+
+const AccountSection: React.FC = () => {
   const navigate = useNavigate();
-  const { user, setUser } = useAuthStore();
-  const [tab, setTab] = useState<SettingsTab>("appearance");
+  const setUser = useAuthStore((s) => s.setUser);
+  const isOnline = useSyncStatusStore((s) => s.isOnline);
+  const pendingMutationCount = useSyncStatusStore(
+    (s) => s.pendingMutationCount,
+  );
+  const showToast = useToastStore((s) => s.showToast);
 
   // Data export
   const [exporting, setExporting] = useState(false);
@@ -448,6 +727,7 @@ export const Settings: React.FC = () => {
       a.download = `gitstars-export-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
+      showToast("数据已导出");
     } catch (e) {
       setExportError(msg(e));
     } finally {
@@ -467,6 +747,7 @@ export const Settings: React.FC = () => {
     setDeleteError("");
     try {
       setDeletion(await requestAccountDeletion());
+      setDeleteInput("");
     } catch (e) {
       setDeleteError(msg(e));
     } finally {
@@ -476,7 +757,7 @@ export const Settings: React.FC = () => {
 
   const onConfirmDeletion = async () => {
     const token = deleteInput.trim();
-    if (!token) return;
+    if (!token || !deletion || token !== deletion.confirmation) return;
     setDeleting(true);
     setDeleteError("");
     try {
@@ -493,145 +774,191 @@ export const Settings: React.FC = () => {
   };
 
   const onSignOut = async () => {
-    if (!window.confirm("确定退出登录？")) return;
+    const pending = pendingMutationCount;
+    if (
+      pending > 0 &&
+      !window.confirm(
+        `本地还有 ${pending} 条未同步的修改，退出前建议先导出数据。确定退出登录？`,
+      )
+    ) {
+      return;
+    } else if (pending === 0 && !window.confirm("确定退出登录？")) {
+      return;
+    }
     await signOutAndResetLocal();
     setUser(null);
     navigate("/");
   };
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 text-ink">
-      <PageHeader title="Settings" description="外观、AI、平台连接与账户管理" />
-      <div className="grid grid-cols-1 min-[721px]:grid-cols-[166px_minmax(0,860px)] gap-5 sm:gap-8 items-start">
-        <nav className="grid min-[721px]:sticky min-[721px]:top-[84px] gap-1 min-[721px]:grid-flow-row max-[720px]:grid-flow-col max-[720px]:overflow-auto">
-          {SETTINGS_TABS.map(({ id, label }) => (
+    <div className="settings-section">
+      <h2>数据与账户</h2>
+      <p>你的收藏、列表和个人整理资料由你管理。</p>
+      {exportError && (
+        <div className="notice error mt16" role="alert">
+          <span className="grow">{exportError}</span>
+        </div>
+      )}
+      <div className="setting-row mt16">
+        <div>
+          <h3>导出全部数据</h3>
+          <p>下载 JSON 格式的收藏、备注、标签与列表。</p>
+        </div>
+        <button
+          type="button"
+          className="btn sm"
+          disabled={exporting || !isOnline}
+          title={!isOnline ? "此操作需要联网" : undefined}
+          onClick={() => void onExport()}
+        >
+          <Download className="ico small" />
+          {exporting ? "导出中…" : "导出数据"}
+        </button>
+      </div>
+      <div className="setting-row">
+        <div>
+          <h3>退出当前账户</h3>
+          <p>
+            退出后清理当前账户的本地缓存。
+            {pendingMutationCount
+              ? ` 本地还有 ${pendingMutationCount} 条未同步修改。`
+              : ""}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn sm"
+          onClick={() => void onSignOut()}
+        >
+          退出登录
+        </button>
+      </div>
+      <div className="danger-area">
+        <h3>删除账户</h3>
+        <p className="muted small mt8">
+          永久删除账户和所属数据。需要获取一次性确认令牌，再输入令牌完成确认。
+        </p>
+        {deleteError && (
+          <div className="notice error mt16" role="alert">
+            <span className="grow">{deleteError}</span>
+          </div>
+        )}
+        {!deletion ? (
+          <div className="row between mt16">
+            <span className="small muted">建议先导出一份数据备份。</span>
             <button
-              key={id}
-              onClick={() => setTab(id)}
-              aria-current={tab === id ? "page" : undefined}
-              className={`flex items-center gap-2.5 px-3 py-2.5 text-[13px] rounded-[7px] text-left max-[720px]:whitespace-nowrap transition-colors ${
-                tab === id
-                  ? "bg-brand-soft text-brand-text font-semibold"
-                  : "text-muted hover:bg-subtle hover:text-ink"
-              }`}
+              type="button"
+              className="btn danger sm"
+              disabled={deleting || !isOnline}
+              title={!isOnline ? "此操作需要联网" : undefined}
+              onClick={() => void onRequestDeletion()}
             >
-              {label}
+              <Trash2 className="ico small" />
+              {deleting ? "处理中…" : "删除账户"}
+            </button>
+          </div>
+        ) : (
+          <>
+            <p
+              className="compare-box mono mt16"
+              style={{ userSelect: "all" }}
+              role="status"
+            >
+              {deletion.confirmation}
+            </p>
+            <label className="field-label mt16">
+              确认令牌
+              <input
+                className="field mono"
+                value={deleteInput}
+                onChange={(e) => setDeleteInput(e.target.value)}
+                placeholder="输入上方确认令牌"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+            <div className="row between mt16">
+              <button
+                type="button"
+                className="btn ghost sm"
+                onClick={() => {
+                  setDeletion(null);
+                  setDeleteInput("");
+                  setDeleteError("");
+                }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn danger-solid sm"
+                disabled={
+                  deleting || deleteInput.trim() !== deletion.confirmation
+                }
+                onClick={() => void onConfirmDeletion()}
+              >
+                <Trash2 className="ico small" />
+                {deleting ? "删除中…" : "永久删除账户"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- 页面 ---------------------------------------------------------------------
+
+type SettingsTab = "appearance" | "ai" | "providers" | "sync" | "account";
+
+const SETTINGS_TABS: Array<{
+  id: SettingsTab;
+  label: string;
+  icon: React.ReactNode;
+}> = [
+  { id: "appearance", label: "外观", icon: <Sun className="ico" /> },
+  { id: "ai", label: "AI 设置", icon: <Sparkles className="ico" /> },
+  { id: "providers", label: "平台连接", icon: <GitHubGlyph className="ico" /> },
+  { id: "sync", label: "同步与缓存", icon: <SyncGlyph className="ico" /> },
+  { id: "account", label: "数据与账户", icon: <ShieldGlyph className="ico" /> },
+];
+
+export const Settings: React.FC = () => {
+  const [tab, setTab] = useState<SettingsTab>("appearance");
+
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <div className="page-title">
+            <h1>设置</h1>
+          </div>
+          <p>让这个工作空间适合你的使用习惯。</p>
+        </div>
+      </div>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="设置分组">
+          {SETTINGS_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={tab === t.id ? "active" : ""}
+              aria-current={tab === t.id ? "true" : undefined}
+              onClick={() => setTab(t.id)}
+            >
+              {t.icon}
+              {t.label}
             </button>
           ))}
         </nav>
-        <div className="min-w-0 grid gap-5">
-          <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
-          {user && (
-            <p className="text-sm text-muted -mt-3">
-              {user.full_name || user.username}
-            </p>
-          )}
-
+        <section className="settings-panel" aria-label="设置详情">
           {tab === "appearance" && <AppearanceSection />}
           {tab === "ai" && <AiSettingsSection />}
           {tab === "providers" && <ProvidersSection />}
-
-          {tab === "account" && (
-            <Section
-              icon={<User className="h-4 w-4 text-muted" />}
-              title="账户"
-              description="导出或删除你的全部数据。"
-            >
-              {exportError && (
-                <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
-                  {exportError}
-                </div>
-              )}
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  onClick={() => void onExport()}
-                  disabled={exporting}
-                  className="inline-flex items-center gap-1.5 text-sm bg-subtle hover:bg-subtle px-3 py-2 rounded disabled:opacity-50"
-                >
-                  <Download className="h-4 w-4" />
-                  {exporting ? "导出中..." : "导出数据"}
-                </button>
-                <span className="text-xs text-muted">
-                  下载 JSON 格式的完整数据（收藏、备注、标签、列表、偏好设置）。
-                </span>
-              </div>
-
-              <div className="border border-red-200 dark:border-red-900 rounded p-3 space-y-3 bg-red-50/50 dark:bg-red-950/30">
-                <div className="flex items-center gap-2 text-sm font-medium text-red-700 dark:text-red-300">
-                  <AlertTriangle className="h-4 w-4" /> 危险区
-                </div>
-                {!deletion ? (
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      onClick={() => void onRequestDeletion()}
-                      disabled={deleting}
-                      className="inline-flex items-center gap-1.5 text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded disabled:opacity-50"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      {deleting ? "处理中..." : "删除账户"}
-                    </button>
-                    <span className="text-xs text-muted">
-                      两步确认：先获取一次性令牌，输入后才会真正删除。
-                    </span>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="text-xs text-muted">
-                      已生成一次性确认令牌。请将它输入到下方输入框以确认删除（令牌仅显示一次）：
-                    </div>
-                    <code className="block text-xs bg-surface border border-red-200 dark:border-red-900 rounded p-2 break-all select-all font-mono text-red-700 dark:text-red-300">
-                      {deletion.confirmation}
-                    </code>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        value={deleteInput}
-                        onChange={(e) => setDeleteInput(e.target.value)}
-                        placeholder="粘贴确认令牌"
-                        className="flex-1 min-w-48 text-sm border border-line-strong rounded px-3 py-2 bg-surface text-ink placeholder-gray-400"
-                      />
-                      <button
-                        onClick={() => void onConfirmDeletion()}
-                        disabled={deleting || !deleteInput.trim()}
-                        className="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded disabled:opacity-50"
-                      >
-                        {deleting ? "删除中..." : "永久删除账户"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setDeletion(null);
-                          setDeleteInput("");
-                          setDeleteError("");
-                        }}
-                        className="text-sm bg-subtle px-3 py-2 rounded"
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {deleteError && (
-                  <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
-                    {deleteError}
-                  </div>
-                )}
-              </div>
-            </Section>
-          )}
-
-          {tab === "account" && (
-            <Section
-              icon={<LogOut className="h-4 w-4 text-muted" />}
-              title="退出登录"
-            >
-              <button
-                onClick={() => void onSignOut()}
-                className="text-sm bg-subtle hover:bg-subtle/70 px-3 py-2 rounded"
-              >
-                退出登录
-              </button>
-            </Section>
-          )}
-        </div>
+          {tab === "sync" && <SyncSection />}
+          {tab === "account" && <AccountSection />}
+        </section>
       </div>
     </div>
   );

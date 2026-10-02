@@ -1,10 +1,12 @@
 // src/components/CacheRecoveryScreen.tsx
 // Local cache recovery path (INH-406): shown when the IndexedDB cache cannot be
 // opened or migrated (corrupt schema, or a cache written by a newer app build).
-// Server-side data is unaffected; the recovery path makes that explicit and never
-// silently deletes queued offline mutations — export is offered before reset.
+// Pixel-faithful port of the prototype `recovery()`. Server-side data is
+// unaffected; the recovery path makes that explicit and never silently deletes
+// queued offline mutations — export is offered before reset.
 
 import React, { useCallback, useEffect, useState } from "react";
+import { Shield, Trash2 } from "lucide-react";
 import { localStore } from "../data";
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
 
@@ -96,49 +98,51 @@ export const CacheRecoveryScreen: React.FC = () => {
   }, [pending]);
 
   const unsupported = cacheError === "unsupported";
-  const pendingCount = pending?.length ?? 0;
+  const pendingLabel =
+    pending === null ? "数量暂时无法确认" : `${pending.length} 条`;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-canvas p-6">
-      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-surface p-6 shadow-card">
-        <h1 className="text-lg font-semibold text-ink">
-          {unsupported ? "本地缓存版本过新" : "本地缓存出现问题"}
-        </h1>
-        <p className="mt-2 text-sm text-muted">
+    <div className="recovery-wrap">
+      <section className="recovery">
+        <span className="hub-mark sand">
+          <Shield className="ico large" />
+        </span>
+        <h1>{unsupported ? "这份缓存来自更高版本" : "本地缓存暂时无法读取"}</h1>
+        <p>
           {unsupported
-            ? "本地缓存由更新版本的 GitStars 写入，当前应用无法读取。请升级应用，或重置本地缓存。"
-            : "本地缓存无法读取或已损坏，需要重置后重新同步。"}{" "}
-          你的服务器数据不受影响。
+            ? "建议先更新 GitStars。重置缓存前，可以尝试导出尚未同步的修改。"
+            : "服务器上的数据不受影响。本地还有尚未同步的修改，请先导出备份，再决定是否重置缓存。"}
         </p>
-
-        {pending !== null && (
-          <div className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-            {pendingCount > 0
-              ? `检测到 ${pendingCount} 条离线期间保存的修改尚未同步。重置缓存会丢弃它们；建议先导出备份。`
-              : "没有检测到未同步的离线修改，可以放心重置。"}
-          </div>
-        )}
-
-        <div className="mt-5 flex flex-col gap-2">
-          {pendingCount > 0 && (
-            <button
-              type="button"
-              onClick={() => void handleExport()}
-              className="w-full rounded-lg border border-line-strong px-4 py-2 text-sm font-medium text-ink hover:bg-subtle"
-            >
-              导出未同步的修改（JSON）
-            </button>
-          )}
+        <div className="recovery-fact">
+          <span className="muted">服务器数据</span>
+          <span className="badge green">不会被重置</span>
+        </div>
+        <div className="recovery-fact">
+          <span className="muted">未同步修改</span>
+          <span className="number">{pendingLabel}</span>
+        </div>
+        <div className="stack">
           <button
             type="button"
+            className="btn primary"
+            onClick={() => void handleExport()}
+          >
+            导出待同步修改
+          </button>
+          <button
+            type="button"
+            className="btn danger"
             disabled={resetting}
             onClick={() => void handleReset()}
-            className="w-full rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
           >
+            <Trash2 className="ico" />
             {resetting ? "正在重置…" : "重置本地缓存"}
           </button>
         </div>
-      </div>
+        <p className="tiny" style={{ marginBottom: 0 }}>
+          如果无法确定队列是否完整，请优先保留现有缓存。
+        </p>
+      </section>
     </div>
   );
 };

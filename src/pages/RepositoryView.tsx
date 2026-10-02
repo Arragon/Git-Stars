@@ -1,16 +1,30 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+// src/pages/RepositoryView.tsx
+// Pixel-faithful port of the prototype `reader()` (reader-head, reader-tabs,
+// reader-layout with readme/files/releases main pane and the reader-aside:
+// AI summary, personal note, manual tags, repo facts). All behaviors preserved:
+// capability gating, lazy per-tab loading, asset downloads, save/unsave,
+// note + tag mutations via offline helpers, AI summary regeneration.
+
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowLeft,
-  Sparkles,
-  Star,
+  BookOpen,
   Bookmark,
   BookmarkCheck,
+  Check,
+  ChevronRight,
+  Code,
   Download,
+  ExternalLink,
   FileText,
   Folder,
+  Plus,
   RotateCw,
+  Sparkles,
+  Tag as TagIcon,
+  WifiOff,
   X,
 } from "lucide-react";
 import {
@@ -30,6 +44,7 @@ import {
 } from "../utils/gitstarsApi";
 import { renderMarkdownSafe } from "../lib/markdown";
 import { summarizeProject } from "../utils/ai";
+import { formatCount } from "../utils/libraryFilters";
 import { ApiError } from "../utils/api";
 import {
   attachTagToSaved,
@@ -43,16 +58,28 @@ import {
   type MutationOutcome,
 } from "../data/offlineMutations";
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
+import { useToastStore } from "../store/useToastStore";
 import { ActivityBadge } from "../components/ActivityBadge";
-import { Badge, Button, Notice, Textarea } from "../components/ui";
+import { Dialog, EmptyState, SkeletonCard } from "../components/ui";
+import { repoEmblem } from "../lib/utils";
 
 type Tab = "readme" | "files" | "releases";
+
+const TAB_ORDER: Tab[] = ["readme", "files", "releases"];
+
+const TAB_DEFS: Array<{ id: Tab; label: string; icon: React.ReactNode }> = [
+  { id: "readme", label: "README", icon: <BookOpen className="ico" /> },
+  { id: "files", label: "文件", icon: <Code className="ico" /> },
+  { id: "releases", label: "Releases", icon: <TagIcon className="ico" /> },
+];
 
 const friendly = (e: unknown, fallback: string): string =>
   e instanceof ApiError ? e.message : fallback;
 
 export const RepositoryView: React.FC = () => {
   const { id = "" } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const showToast = useToastStore((s) => s.showToast);
   const [repo, setRepo] = useState<RepositoryDetailView | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
   const [tab, setTab] = useState<Tab>("readme");
@@ -60,6 +87,9 @@ export const RepositoryView: React.FC = () => {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [tagName, setTagName] = useState("");
+  const tagInputRef = useRef<HTMLInputElement>(null);
   const isOnline = useSyncStatusStore((s) => s.isOnline);
 
   const [readme, setReadme] = useState<string | null>(null);
@@ -158,6 +188,7 @@ export const RepositoryView: React.FC = () => {
               }
             : current,
         );
+        showToast("AI 摘要已更新");
       } catch (err) {
         setError(
           friendly(
@@ -230,81 +261,111 @@ export const RepositoryView: React.FC = () => {
     }
   };
 
+  /** Prototype reader-tab arrow-key navigation (available tabs only). */
+  const availableTabs = TAB_ORDER.filter((t) => {
+    if (!repo?.capabilities) return false;
+    if (t === "readme") return repo.capabilities.readme;
+    if (t === "files") return repo.capabilities.tree;
+    return repo.capabilities.releases;
+  });
+
+  const onTablistKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const i = availableTabs.indexOf(tab);
+    if (i < 0) return;
+    const next =
+      availableTabs[
+        (i + (e.key === "ArrowRight" ? 1 : availableTabs.length - 1)) %
+          availableTabs.length
+      ];
+    setTab(next);
+    document.getElementById(`tab-${next}`)?.focus();
+  };
+
+  const commitTag = async () => {
+    const name = tagName.trim();
+    if (!name || !repo?.saved) return;
+    const existing = tags.find((t) => t.name === name);
+    if (!existing && !isOnline) {
+      setError("离线状态暂不支持新建标签，请联网后重试");
+      return;
+    }
+    try {
+      const tag = existing ?? (await createTag(name));
+      await act(
+        () => attachTagToSaved(repo.saved!.id, tag.id),
+        () =>
+          setRepo({
+            ...repo,
+            saved: repo.saved
+              ? {
+                  ...repo.saved,
+                  tags: [...repo.saved.tags, { id: tag.id, name: tag.name }],
+                }
+              : repo.saved,
+          }),
+      );
+      setTagDialogOpen(false);
+      setTagName("");
+      showToast("手动标签已添加");
+    } catch (err) {
+      setError(friendly(err, "操作失败，请重试"));
+    }
+  };
+
   if (!repo) {
     if (error) {
       return (
-        <div className="max-w-4xl mx-auto p-4 sm:p-6">
-          <div className="bg-surface rounded-lg border border-line p-8 text-center space-y-3">
-            <AlertCircle className="h-10 w-10 text-red-400 mx-auto" />
-            <h2 className="text-base font-semibold text-ink">无法加载仓库</h2>
-            <p className="text-sm text-muted">{error}</p>
-            <Button
+        <EmptyState
+          icon={<AlertCircle className="ico large" />}
+          title="无法加载仓库"
+          description={error}
+          action={
+            <button
+              type="button"
+              className="btn primary"
               onClick={() => {
                 setError("");
                 void load();
               }}
             >
-              <RotateCw className="h-4 w-4" /> 重试
-            </Button>
-          </div>
-        </div>
+              <RotateCw className="ico" /> 重试
+            </button>
+          }
+        />
       );
     }
-    return <div className="max-w-4xl mx-auto p-6 text-muted">加载中...</div>;
+    return (
+      <div role="status" aria-label="正在加载">
+        <SkeletonCard />
+      </div>
+    );
   }
 
   const caps = repo.capabilities;
-  const fullName = repo.namespacePath
-    ? `${repo.namespacePath}/${repo.name}`
-    : repo.name;
+  const emblem = repoEmblem(repo.name);
+  const offline = !isOnline;
 
   return (
-    <div className="max-w-[1240px] mx-auto p-4 sm:p-6 space-y-4 text-ink">
-      <Link
-        to="/library"
-        className="inline-flex items-center gap-1 text-sm text-muted hover:text-gray-800 dark:hover:text-gray-200"
-      >
-        <ArrowLeft className="h-4 w-4" /> Library
-      </Link>
-
-      {error && <Notice tone="error">{error}</Notice>}
-      {notice && <Notice tone="info">{notice}</Notice>}
-
-      <div className="bg-surface rounded-lg border border-line p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-xl font-bold truncate">{fullName}</h1>
-            <div className="text-xs text-muted mt-1 flex items-center gap-3">
-              <span className="uppercase">{repo.providerType}</span>
-              <span className="inline-flex items-center gap-1">
-                <Star className="h-3 w-3" />
-                {repo.starsCount}
-              </span>
-              <span>forks {repo.forksCount}</span>
-              {repo.primaryLanguage && <span>{repo.primaryLanguage}</span>}
-              <ActivityBadge owner={repo.namespacePath} repo={repo.name} />
-              {repo.visibility === "private" && (
-                <span className="text-amber-600 dark:text-amber-400">
-                  private
-                </span>
-              )}
-            </div>
-            {repo.description && (
-              <p className="text-sm text-muted mt-2">{repo.description}</p>
-            )}
-            <a
-              href={repo.webUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-blue-600 dark:text-blue-400 hover:underline mt-1 inline-block"
-            >
-              {repo.webUrl}
-            </a>
+    <div>
+      <div className="reader-head">
+        <span className={`repo-emblem ${emblem.toneCls}`}>
+          {emblem.initials}
+        </span>
+        <div className="grow">
+          <div className="muted tiny">
+            {repo.namespacePath ? `${repo.namespacePath} /` : ""}
           </div>
+          <h1>{repo.name}</h1>
+        </div>
+        <div className="page-actions">
           {repo.saved ? (
-            <Button
-              variant="secondary"
-              size="sm"
+            <button
+              type="button"
+              className="btn"
+              disabled={busy}
+              title="已收藏，点击移除"
               onClick={() => {
                 if (!window.confirm("确定将该仓库从收藏移除？")) return;
                 void act(
@@ -316,14 +377,15 @@ export const RepositoryView: React.FC = () => {
                   () => setRepo({ ...repo, saved: null }),
                 );
               }}
-              disabled={busy}
-              className="shrink-0 !bg-brand-50 dark:!bg-brand-500/10 !text-brand-700 dark:!text-brand-300 !border-brand-200 dark:!border-brand-500/30"
-              title="已收藏，点击移除"
             >
-              <BookmarkCheck className="h-4 w-4" /> Saved
-            </Button>
+              <BookmarkCheck className="ico" /> 已收藏
+            </button>
           ) : (
-            <Button
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || offline}
+              title={offline ? "离线状态暂不支持收藏" : "收藏到我的库"}
               onClick={() =>
                 void act(
                   () => saveRepositoryFromLibrary(repo.id),
@@ -340,250 +402,297 @@ export const RepositoryView: React.FC = () => {
                     }),
                 )
               }
-              disabled={busy || !isOnline}
-              title={isOnline ? "收藏到我的库" : "离线状态暂不支持收藏"}
-              className="shrink-0"
-              size="sm"
             >
-              <Bookmark className="h-4 w-4" /> Save
-            </Button>
+              <Bookmark className="ico" /> 收藏到库
+            </button>
           )}
+          <a
+            className="btn"
+            href={repo.webUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <ExternalLink className="ico" />
+            来源仓库
+          </a>
         </div>
       </div>
 
-      {/* Reader layout: main content + organize aside */}
-      <div className="grid grid-cols-1 min-[1051px]:grid-cols-[minmax(0,1fr)_282px] gap-6 items-start">
-        <div className="min-w-0">
-          <div className="flex gap-[25px] border-b border-line text-sm mb-[23px]">
-            {caps?.readme && (
-              <TabButton
-                active={tab === "readme"}
-                onClick={() => setTab("readme")}
-                icon={<FileText className="h-4 w-4" />}
-                label="README"
-              />
-            )}
-            {caps?.tree && (
-              <TabButton
-                active={tab === "files"}
-                onClick={() => setTab("files")}
-                icon={<Folder className="h-4 w-4" />}
-                label="Files"
-              />
-            )}
-            {caps?.releases && (
-              <TabButton
-                active={tab === "releases"}
-                onClick={() => setTab("releases")}
-                icon={<Download className="h-4 w-4" />}
-                label="Releases"
-              />
-            )}
-          </div>
+      {offline && (
+        <div className="notice warning">
+          <WifiOff className="ico" />
+          <span className="grow">
+            正在查看本地缓存。备注与标签的更改会在联网后同步。
+          </span>
+        </div>
+      )}
+      {error && (
+        <div className="notice error" role="alert">
+          <span className="grow">{error}</span>
+        </div>
+      )}
+      {notice && (
+        <div className="notice">
+          <span className="grow">{notice}</span>
+        </div>
+      )}
 
-          <div className="bg-surface rounded-lg border border-line p-4 min-h-[12rem]">
-            {tab === "readme" &&
-              (readme ? (
+      <div
+        className="reader-tabs"
+        role="tablist"
+        aria-label="仓库内容"
+        onKeyDown={onTablistKeyDown}
+      >
+        {TAB_DEFS.filter((t) =>
+          t.id === "readme"
+            ? caps?.readme
+            : t.id === "files"
+              ? caps?.tree
+              : caps?.releases,
+        ).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`tab-${t.id}`}
+            tabIndex={tab === t.id ? 0 : -1}
+            aria-selected={tab === t.id}
+            aria-controls="reader-content"
+            className={tab === t.id ? "active" : ""}
+            onClick={() => setTab(t.id)}
+          >
+            {t.icon}
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="reader-layout">
+        <section
+          id="reader-content"
+          role="tabpanel"
+          aria-labelledby={`tab-${tab}`}
+          tabIndex={0}
+        >
+          {offline ? (
+            <EmptyState
+              icon={<WifiOff className="ico large" />}
+              title="这部分内容尚未缓存"
+              description="离线时可查看已缓存的仓库资料、摘要、标签与备注。README、文件和发布资料需要联网获取。"
+              action={
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => navigate("/library")}
+                >
+                  <ArrowLeft className="ico" /> 返回收藏库
+                </button>
+              }
+            />
+          ) : tab === "readme" ? (
+            <article className="readme">
+              <div className="doc-label">
+                <span className="row gap8">
+                  <BookOpen className="ico small" />
+                  README.md
+                </span>
+              </div>
+              {readme ? (
                 <div
-                  className="text-sm text-ink"
                   dangerouslySetInnerHTML={{
                     __html: renderMarkdownSafe(readme),
                   }}
                 />
               ) : (
-                <div className="text-sm text-muted">
+                <p className="muted small">
                   {caps?.readme
-                    ? "Loading README..."
-                    : "README not available for this provider."}
-                </div>
-              ))}
-
-            {tab === "files" && (
-              <div className="text-sm">
-                {file ? (
-                  <div>
-                    <button
-                      onClick={() => setFile(null)}
-                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline mb-2 inline-flex items-center gap-1"
-                    >
-                      <ArrowLeft className="h-3 w-3" /> Back to files
-                    </button>
-                    <pre className="bg-subtle border border-line-strong rounded p-3 overflow-auto text-xs whitespace-pre-wrap text-ink">
-                      {file.content}
-                    </pre>
-                  </div>
-                ) : entries ? (
-                  <div>
-                    {dirPath && (
-                      <button
-                        onClick={async () => {
-                          const parent = dirPath
-                            .split("/")
-                            .slice(0, -1)
-                            .join("/");
-                          setDirPath(parent);
-                          const t = await getTree(id, "", parent);
-                          setEntries(t.entries);
-                        }}
-                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline mb-2"
-                      >
-                        .. up
-                      </button>
-                    )}
-                    <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                      {entries.map((e) => (
-                        <li
-                          key={e.path}
-                          className="py-1.5 flex items-center gap-2"
-                        >
-                          {e.type === "dir" ? (
-                            <Folder className="h-4 w-4 text-gray-400" />
-                          ) : (
-                            <FileText className="h-4 w-4 text-gray-400" />
-                          )}
-                          {e.type === "dir" ? (
-                            <button
-                              className="hover:underline"
-                              onClick={async () => {
-                                setDirPath(e.path);
-                                const t = await getTree(id, "", e.path);
-                                setEntries(t.entries);
-                              }}
-                            >
-                              {e.path.split("/").pop()}
-                            </button>
-                          ) : (
-                            <button
-                              className="hover:underline"
-                              onClick={() => openFile(e.path)}
-                            >
-                              {e.path.split("/").pop()}
-                            </button>
-                          )}
-                          {typeof e.size === "number" && (
-                            <span className="ml-auto text-xs text-muted">
-                              {e.size} B
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <div className="text-muted">
-                    {caps?.tree
-                      ? "Loading files..."
-                      : "File browsing not available for this provider."}
-                  </div>
+                    ? "正在加载 README…"
+                    : "该平台暂不支持 README。"}
+                </p>
+              )}
+            </article>
+          ) : tab === "files" ? (
+            <div className="files-layout">
+              <div className="file-line">
+                <span className="mono">
+                  {file ? file.path : dirPath ? `${dirPath} /` : "main /"}
+                </span>
+                {(file || dirPath) && (
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    onClick={() => {
+                      if (file) {
+                        setFile(null);
+                        return;
+                      }
+                      const parent = dirPath.split("/").slice(0, -1).join("/");
+                      setDirPath(parent);
+                      void getTree(id, "", parent).then((t) =>
+                        setEntries(t.entries),
+                      );
+                    }}
+                  >
+                    <ArrowLeft className="ico small" /> 返回目录
+                  </button>
                 )}
+                {!file && !dirPath && <span className="muted">仓库目录</span>}
               </div>
-            )}
-
-            {tab === "releases" && (
-              <div className="text-sm space-y-3">
-                {releases?.map((rel) => (
-                  <div key={rel.id} className="border border-line rounded p-3">
-                    <div className="font-medium">
-                      {rel.name || rel.tagName}{" "}
-                      <span className="text-muted font-normal">
-                        {rel.tagName}
-                      </span>
-                    </div>
+              {file ? (
+                <pre className="file-code">{file.content}</pre>
+              ) : entries ? (
+                entries.map((e) => (
+                  <button
+                    key={e.path}
+                    type="button"
+                    className="file-line"
+                    onClick={() => {
+                      if (e.type === "dir") {
+                        setDirPath(e.path);
+                        void getTree(id, "", e.path).then((t) =>
+                          setEntries(t.entries),
+                        );
+                      } else {
+                        void openFile(e.path);
+                      }
+                    }}
+                  >
+                    {e.type === "dir" ? (
+                      <Folder className="ico" />
+                    ) : (
+                      <FileText className="ico" />
+                    )}
+                    <span className="mono">{e.path.split("/").pop()}</span>
+                    <span className="muted">
+                      {e.type === "dir"
+                        ? "打开目录"
+                        : typeof e.size === "number"
+                          ? `${e.size} B`
+                          : "查看文件"}
+                    </span>
+                    <ChevronRight className="ico small" />
+                  </button>
+                ))
+              ) : (
+                <div className="file-line">
+                  <span className="muted">
+                    {caps?.tree ? "正在加载文件…" : "该平台暂不支持文件浏览。"}
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <article className="readme">
+              <div className="doc-label">
+                <span>Releases</span>
+                <a
+                  href={`${repo.webUrl}/releases`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="row gap8"
+                >
+                  来源平台 <ExternalLink className="ico small" />
+                </a>
+              </div>
+              {releases === null ? (
+                <p className="muted small">
+                  {caps?.releases
+                    ? "正在加载发布版本…"
+                    : "该平台暂不支持 Releases。"}
+                </p>
+              ) : releases.length === 0 ? (
+                <p className="muted small">还没有发布版本。</p>
+              ) : (
+                releases.map((rel) => (
+                  <section className="release" key={rel.id}>
+                    <h2>
+                      {rel.tagName}
+                      {rel.name && rel.name !== rel.tagName && (
+                        <span className="muted small">{rel.name}</span>
+                      )}
+                    </h2>
                     {rel.publishedAt && (
-                      <div className="text-xs text-muted">
+                      <p className="tiny">
                         {new Date(rel.publishedAt).toLocaleDateString()}
+                      </p>
+                    )}
+                    {rel.assets.length > 0 && (
+                      <div className="row wrap mt8">
+                        {rel.assets.map((a) => (
+                          <a
+                            key={a.id}
+                            className="btn sm"
+                            href={assetDownloadUrl(id, a.id)}
+                          >
+                            <Download className="ico small" />
+                            {a.name}（{Math.max(1, Math.round(a.size / 1024))}{" "}
+                            KB）
+                          </a>
+                        ))}
                       </div>
                     )}
-                    <ul className="mt-2 space-y-1">
-                      {rel.assets.map((a) => (
-                        <li
-                          key={a.id}
-                          className="flex items-center justify-between gap-2"
-                        >
-                          <span className="text-ink">
-                            {a.name}{" "}
-                            <span className="text-xs text-muted">
-                              ({Math.max(1, Math.round(a.size / 1024))} KB)
-                            </span>
-                          </span>
-                          <a
-                            href={assetDownloadUrl(id, a.id)}
-                            className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                          >
-                            <Download className="h-3 w-3" /> Download
-                          </a>
-                        </li>
-                      ))}
-                      {rel.assets.length === 0 && (
-                        <li className="text-xs text-muted">No assets</li>
-                      )}
-                    </ul>
-                  </div>
-                ))}
-                {releases && releases.length === 0 && (
-                  <div className="text-muted">No releases.</div>
-                )}
-                {!releases && (
-                  <div className="text-muted">
-                    {caps?.releases
-                      ? "Loading releases..."
-                      : "Releases not available for this provider."}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+                    <p className="mt8">
+                      <a
+                        href={`${repo.webUrl}/releases`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        在来源平台查看发布说明{" "}
+                        <ExternalLink className="ico small" />
+                      </a>
+                    </p>
+                  </section>
+                ))
+              )}
+            </article>
+          )}
+        </section>
 
-        <aside className="grid gap-6 min-[1051px]:sticky min-[1051px]:top-[84px] min-[561px]:grid-cols-1 min-[1051px]:grid-cols-1 min-[1051px]:block">
+        <aside className="reader-aside">
           {repo.saved && (
             <>
-              <div className="border border-line rounded-xl bg-surface p-5">
-                <h3 className="text-xs font-semibold flex items-center gap-2 mb-3">
-                  <Sparkles className="h-3.5 w-3.5 text-ai" /> AI 摘要
-                </h3>
-                {repo.saved.aiSummary ? (
-                  <p className="text-xs leading-[1.9] text-muted">
-                    {repo.saved.aiSummary}
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted mb-3">
-                    尚未生成。AI 摘要与标签由设置中配置的厂商生成。
-                  </p>
-                )}
-                <Button
-                  variant="ai"
-                  size="xs"
-                  onClick={runAiSummary}
-                  disabled={aiBusy}
-                  className="mt-2"
-                >
-                  <Sparkles
-                    className={`h-3.5 w-3.5 ${aiBusy ? "animate-pulse" : ""}`}
-                  />
-                  {aiBusy
-                    ? "生成中…"
-                    : repo.saved.aiSummary
-                      ? "重新生成"
-                      : "生成摘要与标签"}
-                </Button>
+              <section className="aside-section">
+                <div className="row between mb16">
+                  <h3 style={{ margin: 0, color: "var(--violet)" }}>
+                    <Sparkles className="ico small" />
+                    AI 摘要
+                  </h3>
+                  <button
+                    type="button"
+                    className="btn icon ghost sm"
+                    aria-label="重新生成摘要"
+                    title="重新生成摘要"
+                    disabled={aiBusy || offline}
+                    onClick={runAiSummary}
+                  >
+                    <RotateCw
+                      className={`ico small ${aiBusy ? "animate-spin" : ""}`}
+                    />
+                  </button>
+                </div>
+                <p className="ai-copy">
+                  {repo.saved.aiSummary || "还没有摘要，可以按需生成。"}
+                </p>
                 {(repo.saved.aiTags ?? []).length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-3">
+                  <div className="row wrap mt16">
                     {(repo.saved.aiTags ?? []).map((name) => (
-                      <Badge key={`ai-${name}`} tone="ai">
+                      <span className="badge violet" key={`ai-${name}`}>
                         {name}
-                      </Badge>
+                      </span>
                     ))}
                   </div>
                 )}
-              </div>
+              </section>
 
-              <div className="border border-line rounded-xl bg-surface p-5">
-                <h3 className="text-xs font-semibold flex items-center gap-2 mb-3">
-                  <FileText className="h-3.5 w-3.5 text-muted" /> 个人备注
+              <section className="aside-section">
+                <h3>
+                  <FileText className="ico small" />
+                  个人备注
                 </h3>
-                <Textarea
-                  className="min-h-[98px] text-xs"
+                <textarea
+                  className="field"
+                  aria-label="个人备注"
+                  placeholder="记录你的使用场景、待验证问题…"
                   defaultValue={repo.saved.note ?? ""}
                   onBlur={(e) => {
                     const v = e.target.value;
@@ -608,141 +717,192 @@ export const RepositoryView: React.FC = () => {
                     );
                   }}
                 />
-                <p className="text-[10px] text-muted mt-2">
-                  停止输入后自动保存；离线时保存在本地待同步。
-                </p>
-              </div>
+                <div className="save-state">
+                  <Check className="ico small" />
+                  {offline
+                    ? "编辑后保存在本地，等待同步"
+                    : "停止输入后自动保存"}
+                </div>
+              </section>
 
-              <div className="border border-line rounded-xl bg-surface p-5">
-                <h3 className="text-xs font-semibold flex items-center gap-2 mb-3">
-                  <Star className="h-3.5 w-3.5 text-muted" /> 手动标签
+              <section className="aside-section">
+                <h3>
+                  <TagIcon className="ico small" />
+                  手动标签
                 </h3>
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="row wrap">
                   {repo.saved.tags.map((t) => (
-                    <span
+                    <button
                       key={t.id}
-                      className="inline-flex items-center gap-1 bg-subtle text-ink text-xs rounded px-2 py-0.5"
+                      type="button"
+                      className="chip active"
+                      aria-label={`移除手动标签 ${t.name}`}
+                      disabled={busy}
+                      onClick={() =>
+                        void act(
+                          () => detachTagFromSaved(repo.saved!.id, t.id),
+                          () =>
+                            setRepo({
+                              ...repo,
+                              saved: repo.saved
+                                ? {
+                                    ...repo.saved,
+                                    tags: repo.saved.tags.filter(
+                                      (x) => x.id !== t.id,
+                                    ),
+                                  }
+                                : repo.saved,
+                            }),
+                        )
+                      }
                     >
                       {t.name}
-                      <button
-                        onClick={() =>
-                          void act(
-                            () => detachTagFromSaved(repo.saved!.id, t.id),
-                            () =>
-                              setRepo({
-                                ...repo,
-                                saved: repo.saved
-                                  ? {
-                                      ...repo.saved,
-                                      tags: repo.saved.tags.filter(
-                                        (x) => x.id !== t.id,
-                                      ),
-                                    }
-                                  : repo.saved,
-                              }),
-                          )
-                        }
-                        className="text-muted hover:text-danger"
-                        aria-label={`移除标签 ${t.name}`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
+                      <X className="ico small" />
+                    </button>
                   ))}
-                  <input
-                    className="text-xs border border-dashed border-line-strong rounded px-2 py-0.5 w-28 bg-transparent text-ink placeholder-muted"
-                    placeholder="+ 标签"
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter") return;
-                      const name = (e.target as HTMLInputElement).value.trim();
-                      if (!name) return;
-                      (e.target as HTMLInputElement).value = "";
-                      const existing = tags.find((t) => t.name === name);
-                      if (!existing && !isOnline) {
-                        setError("离线状态暂不支持新建标签，请联网后重试");
-                        return;
-                      }
-                      void (async () => {
-                        try {
-                          const tag = existing ?? (await createTag(name));
-                          await act(
-                            () => attachTagToSaved(repo.saved!.id, tag.id),
-                            () =>
-                              setRepo({
-                                ...repo,
-                                saved: repo.saved
-                                  ? {
-                                      ...repo.saved,
-                                      tags: [
-                                        ...repo.saved.tags,
-                                        { id: tag.id, name: tag.name },
-                                      ],
-                                    }
-                                  : repo.saved,
-                              }),
-                          );
-                        } catch (err) {
-                          setError(friendly(err, "操作失败，请重试"));
-                        }
-                      })();
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    onClick={() => {
+                      setTagName("");
+                      setTagDialogOpen(true);
+                      setTimeout(() => tagInputRef.current?.focus(), 0);
                     }}
-                  />
+                  >
+                    <Plus className="ico small" />
+                    添加标签
+                  </button>
                 </div>
-              </div>
+              </section>
 
-              <div className="border border-line rounded-xl bg-surface p-5 grid gap-3 text-xs text-muted">
-                <h3 className="text-xs font-semibold text-ink">仓库资料</h3>
-                <div className="flex justify-between gap-3">
-                  <span>来源</span>
-                  <span className="text-ink uppercase">
-                    {repo.providerType}
-                  </span>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <span>Stars</span>
-                  <span className="text-ink">{repo.starsCount}</span>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <span>Forks</span>
-                  <span className="text-ink">{repo.forksCount}</span>
-                </div>
-                {repo.primaryLanguage && (
-                  <div className="flex justify-between gap-3">
-                    <span>语言</span>
-                    <span className="text-ink">{repo.primaryLanguage}</span>
+              <section className="aside-section">
+                <h3>仓库资料</h3>
+                <div className="repo-facts">
+                  <div>
+                    <span>平台</span>
+                    <span className="row gap8">
+                      {repo.providerType === "github" ? (
+                        <svg className="ico small" viewBox="0 0 24 24">
+                          <path
+                            d="M9 20c-5 1-5-2-7-3m14 5v-4a3.5 3.5 0 0 0-1-2.8c3.4-.4 7-1.7 7-7.3a5.5 5.5 0 0 0-1.5-3.8A5 5 0 0 0 20 0s-1.3-.4-4 1.5a13 13 0 0 0-8 0C5.3-.4 4 0 4 0a5 5 0 0 0-.5 3.1A5.5 5.5 0 0 0 2 6.9c0 5.6 3.6 6.9 7 7.3A3.5 3.5 0 0 0 8 17v5"
+                            transform="translate(0 1) scale(.95)"
+                          />
+                        </svg>
+                      ) : null}
+                      {repo.providerType.toUpperCase()}
+                    </span>
                   </div>
-                )}
-                <div className="flex justify-between gap-3 items-center">
-                  <span>活跃度</span>
-                  <ActivityBadge owner={repo.namespacePath} repo={repo.name} />
+                  <div>
+                    <span>主要语言</span>
+                    <span>{repo.primaryLanguage || "—"}</span>
+                  </div>
+                  <div>
+                    <span>Stars</span>
+                    <span className="number">
+                      {formatCount(repo.starsCount)}
+                    </span>
+                  </div>
+                  <div>
+                    <span>Forks</span>
+                    <span className="number">
+                      {formatCount(repo.forksCount)}
+                    </span>
+                  </div>
+                  <div>
+                    <span>可见性</span>
+                    <span>
+                      {repo.visibility === "private" ? "私有" : "公开"}
+                    </span>
+                  </div>
+                  <div>
+                    <span>活跃度</span>
+                    <ActivityBadge
+                      owner={repo.namespacePath}
+                      repo={repo.name}
+                    />
+                  </div>
                 </div>
-                <a
-                  href={repo.webUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-info hover:underline break-all"
-                >
-                  在 GitHub 打开 ↗
-                </a>
-              </div>
+              </section>
             </>
+          )}
+          {!repo.saved && (
+            <section className="aside-section">
+              <h3>仓库资料</h3>
+              <div className="repo-facts">
+                <div>
+                  <span>平台</span>
+                  <span>{repo.providerType.toUpperCase()}</span>
+                </div>
+                <div>
+                  <span>主要语言</span>
+                  <span>{repo.primaryLanguage || "—"}</span>
+                </div>
+                <div>
+                  <span>Stars</span>
+                  <span className="number">{formatCount(repo.starsCount)}</span>
+                </div>
+                <div>
+                  <span>Forks</span>
+                  <span className="number">{formatCount(repo.forksCount)}</span>
+                </div>
+                <div>
+                  <span>可见性</span>
+                  <span>{repo.visibility === "private" ? "私有" : "公开"}</span>
+                </div>
+              </div>
+              <p className="small muted mt16">
+                收藏到库后，可以在这里记录备注、标签与 AI 摘要。
+              </p>
+            </section>
           )}
         </aside>
       </div>
+
+      {/* Add-tag dialog (prototype `add-tag`) */}
+      <Dialog
+        open={tagDialogOpen}
+        onClose={() => setTagDialogOpen(false)}
+        title="添加手动标签"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setTagDialogOpen(false)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!tagName.trim()}
+              onClick={() => void commitTag()}
+            >
+              <Plus className="ico" />
+              添加标签
+            </button>
+          </>
+        }
+      >
+        <p>手动标签与 AI 标签分别显示，方便你保留自己的分类。</p>
+        <label className="field-label mt16">
+          标签名称
+          <input
+            ref={tagInputRef}
+            className="field"
+            value={tagName}
+            maxLength={40}
+            placeholder="例如：正在使用"
+            onChange={(e) => setTagName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void commitTag();
+              }
+            }}
+          />
+        </label>
+      </Dialog>
     </div>
   );
 };
-
-const TabButton: React.FC<{
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-}> = ({ active, onClick, icon, label }) => (
-  <button
-    onClick={onClick}
-    className={`inline-flex items-center gap-1 px-3 py-2 border-b-2 -mb-px ${active ? "border-brand text-ink font-semibold" : "border-transparent text-muted hover:text-ink"}`}
-  >
-    {icon} {label}
-  </button>
-);

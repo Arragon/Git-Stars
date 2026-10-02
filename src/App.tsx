@@ -17,6 +17,7 @@ import {
 import { pullSync, pushReplay } from "./sync/syncClient";
 import { localStore } from "./data";
 import { CacheRecoveryScreen } from "./components/CacheRecoveryScreen";
+import { Toasts } from "./components/Toasts";
 import { classifyCacheError } from "./utils/cacheRecovery";
 
 const SyncProvider: React.FC<{ children: React.ReactNode }> = ({
@@ -71,7 +72,12 @@ const SyncProvider: React.FC<{ children: React.ReactNode }> = ({
     return <CacheRecoveryScreen />;
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <Toasts />
+    </>
+  );
 };
 
 function App() {

@@ -1,6 +1,11 @@
+// src/pages/Hub.tsx
+// Public Hub catalog browser (/hub, INH-435). Anonymous-friendly: search,
+// sort and keyset-paginated cards over active + hub-opted-in publications.
+// Pixel-faithful port of the prototype `hub()` markup, driven by real data.
+
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Copy, Search, Star } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowRight, Folder, Globe, Plus, Search, WifiOff } from "lucide-react";
 import {
   fetchHubLists,
   importPublicList,
@@ -8,10 +13,10 @@ import {
 } from "../utils/gitstarsApi";
 import { ApiError } from "../utils/api";
 import { useAuthStore } from "../store/useAuthStore";
-
-// Public Hub catalog browser (/hub, INH-435). Anonymous-friendly: search,
-// sort and keyset-paginated cards over active + hub-opted-in publications.
-// Detail view is the same public snapshot as /s/:shareId (single domain).
+import { useSyncStatusStore } from "../store/useSyncStatusStore";
+import { useToastStore } from "../store/useToastStore";
+import { EmptyState, SkeletonCard } from "../components/ui";
+import { repoEmblem } from "../lib/utils";
 
 const msg = (e: unknown): string =>
   e instanceof ApiError
@@ -25,6 +30,8 @@ const PAGE_SIZE = 20;
 export const Hub: React.FC = () => {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const isOnline = useSyncStatusStore((s) => s.isOnline);
+  const showToast = useToastStore((s) => s.showToast);
 
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "title">("recent");
@@ -95,6 +102,7 @@ export const Hub: React.FC = () => {
     try {
       await importPublicList(entry.shareId);
       setCopied(entry.shareId);
+      showToast(`已复制「${entry.title}」到我的列表`);
       setTimeout(() => navigate("/lists"), 700);
     } catch (e) {
       setError(msg(e));
@@ -103,95 +111,175 @@ export const Hub: React.FC = () => {
     }
   };
 
+  const retry = (
+    <button
+      type="button"
+      className="btn primary"
+      onClick={() => void load({ q: query.trim() || undefined, sort })}
+    >
+      重新加载
+    </button>
+  );
+
   return (
-    <div className="max-w-[1880px] mx-auto space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Hub</h1>
+    <div>
+      <div className="page-head">
+        <div>
+          <div className="page-title">
+            <h1>Hub 广场</h1>
+          </div>
+          <p>发现他人公开分享的开源清单，整理成自己的工具箱。</p>
+        </div>
+      </div>
+
+      <div className="toolbar mb16">
+        <div className="search-field">
+          <Search className="ico" />
+          <input
+            className="field"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索公开列表"
+            aria-label="搜索公开列表"
+          />
+        </div>
         <select
+          className="field"
+          aria-label="公开列表排序"
           value={sort}
           onChange={(e) => setSort(e.target.value as "recent" | "title")}
-          className="text-sm border border-gray-200 rounded px-2 py-2 bg-white"
-          aria-label="排序方式"
+          style={{ width: "auto", minWidth: 130, minHeight: 36 }}
         >
           <option value="recent">最近更新</option>
-          <option value="title">标题</option>
+          <option value="title">名称排序</option>
         </select>
       </div>
 
-      <div className="relative">
-        <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索公开 Lists..."
-          className="w-full text-sm border border-gray-200 rounded px-9 py-2 bg-white"
-        />
-      </div>
-
       {error && (
-        <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
-          {error}
+        <div className="notice error" role="alert">
+          <span className="grow">{error}</span>
         </div>
       )}
 
-      {loading ? (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {!isOnline ? (
+        <EmptyState
+          icon={<WifiOff className="ico large" />}
+          title="公开列表需要联网查看"
+          description="收藏库中的本地内容仍然可以访问。恢复连接后再来发现新的清单。"
+          action={
+            <Link to="/library" className="btn primary">
+              返回收藏库
+            </Link>
+          }
+        />
+      ) : loading ? (
+        <div className="hub-grid" role="status" aria-label="正在加载">
           {[0, 1, 2, 3, 4, 5].map((i) => (
-            <div
-              key={i}
-              className="h-28 bg-white border border-gray-200 rounded-lg animate-pulse"
-            />
+            <SkeletonCard key={i} />
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-10 text-center text-sm text-gray-500">
-          {query ? "没有匹配的公开 Lists。" : "Hub 还没有任何公开 Lists。"}
-        </div>
+        query ? (
+          <EmptyState
+            icon={<Search className="ico large" />}
+            title="没有找到这个主题"
+            description="换一个关键词，或查看全部公开列表。"
+            action={
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => {
+                  setQuery("");
+                  setSort("recent");
+                }}
+              >
+                清除搜索
+              </button>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={<Globe className="ico large" />}
+            title="这里还没有公开列表"
+            description="你可以先整理自己的列表。发布分享快照后，再选择是否展示到 Hub。"
+            action={
+              user ? (
+                <Link to="/lists" className="btn primary">
+                  整理我的列表
+                </Link>
+              ) : (
+                <Link to="/" className="btn primary">
+                  使用 GitHub 登录
+                </Link>
+              )
+            }
+          />
+        )
       ) : (
         <>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {items.map((entry) => (
-              <div
-                key={entry.shareId}
-                className="bg-white border border-gray-200 rounded-lg p-4 flex flex-col gap-2 hover:border-gray-400 transition-colors"
-              >
-                <button
-                  onClick={() => navigate(`/s/${entry.shareId}`)}
-                  className="text-left flex-1"
-                >
-                  <div className="text-sm font-semibold text-gray-900 line-clamp-1">
-                    {entry.title}
+          <div className="results-line">
+            <span>{items.length} 个公开列表</span>
+            <span>仅包含主动公开到 Hub 的快照</span>
+          </div>
+          <div className="hub-grid">
+            {items.map((entry) => {
+              const emblem = repoEmblem(entry.title);
+              return (
+                <article className="hub-card" key={entry.shareId}>
+                  <div className="hub-card-top">
+                    <span className={`hub-mark ${emblem.tone}`}>
+                      <Folder className="ico large" />
+                    </span>
+                    <span className="badge">
+                      <Globe className="ico small" />
+                      公开
+                    </span>
                   </div>
-                  <div className="text-xs text-gray-500 line-clamp-2 mt-0.5 min-h-[2rem]">
-                    {entry.description || "（无描述）"}
+                  <h2>
+                    <Link to={`/s/${entry.shareId}`}>{entry.title}</Link>
+                  </h2>
+                  <p>{entry.description || "（无描述）"}</p>
+                  <div className="hub-meta">
+                    <span className="number">
+                      {entry.repositoryCount} 个仓库
+                    </span>
+                    <span>
+                      {new Date(entry.updatedAt).toLocaleDateString()} 更新
+                    </span>
                   </div>
-                </button>
-                <div className="flex items-center justify-between">
-                  <div className="text-xs text-gray-400 inline-flex items-center gap-1">
-                    <Star className="h-3 w-3" />
-                    {entry.repositoryCount} 个仓库 ·{" "}
-                    {new Date(entry.updatedAt).toLocaleDateString()}
+                  <div className="hub-actions">
+                    <Link
+                      to={`/s/${entry.shareId}`}
+                      className="row gap8"
+                      style={{ color: "inherit" }}
+                    >
+                      查看清单 <ArrowRight className="ico small" />
+                    </Link>
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      disabled={importing === entry.shareId}
+                      title="复制到我的列表"
+                      onClick={() => void onImport(entry)}
+                    >
+                      <Plus className="ico small" />
+                      {importing === entry.shareId
+                        ? "复制中…"
+                        : copied === entry.shareId
+                          ? "已复制"
+                          : "复制到我的列表"}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => onImport(entry)}
-                    disabled={importing === entry.shareId}
-                    title="复制到我的 Lists"
-                    className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2 py-1 disabled:opacity-60"
-                  >
-                    <Copy className="h-3 w-3" />
-                    {importing === entry.shareId
-                      ? "复制中..."
-                      : copied === entry.shareId
-                        ? "已复制"
-                        : "复制到我的 Lists"}
-                  </button>
-                </div>
-              </div>
-            ))}
+                </article>
+              );
+            })}
           </div>
           {hasMore && nextCursor && (
-            <div className="text-center pt-2">
+            <div className="mt16" style={{ textAlign: "center" }}>
               <button
+                type="button"
+                className="btn"
+                disabled={loadingMore}
                 onClick={() =>
                   void load({
                     q: query.trim() || undefined,
@@ -200,15 +288,19 @@ export const Hub: React.FC = () => {
                     cursor: nextCursor,
                   })
                 }
-                disabled={loadingMore}
-                className="text-sm bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded disabled:opacity-60"
               >
-                {loadingMore ? "加载中..." : "加载更多"}
+                {loadingMore ? "加载中…" : "加载更多"}
               </button>
+            </div>
+          )}
+          {!user && (
+            <div className="footer-note">
+              <span>复制公开列表需要先登录</span>
             </div>
           )}
         </>
       )}
+      {error && !loading && items.length > 0 && retry}
     </div>
   );
 };

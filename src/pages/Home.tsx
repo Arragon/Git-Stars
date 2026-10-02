@@ -1,14 +1,11 @@
+// src/pages/Home.tsx
+// Pixel-faithful port of the prototype `home()` (login layout + decorative
+// preview card), keeping the real auth flows: GitHub OAuth redirect, dev login
+// and the ?redirect= return path.
+
 import React, { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import {
-  Github,
-  Star,
-  Search,
-  ListChecks,
-  Share2,
-  AlertCircle,
-  Terminal,
-} from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { AlertCircle, BookmarkCheck, Search } from "lucide-react";
 import { apiPost } from "../utils/api";
 import { useAuthStore } from "../store/useAuthStore";
 
@@ -19,10 +16,79 @@ const ERROR_MESSAGES: Record<string, string> = {
   oauth_state_invalid:
     "OAuth state validation failed. Please try signing in again.",
   oauth_failed: "GitHub OAuth authentication failed. Please try again.",
-  github_rate_limit: "GitHub API rate limit exceeded. Please try again later.",
+  github_rate_limit: "GitHub API rate limit exceeded. Please try later.",
   oauth_not_configured:
     "GitHub OAuth is not configured on this server. Use dev login or set GITHUB_CLIENT_ID/SECRET.",
 };
+
+// Decorative sample rows for the 界面示例 preview card (prototype fixtures).
+const PREVIEW_ROWS = [
+  {
+    owner: "honojs",
+    name: "hono",
+    mark: "h",
+    toneCls: "bg-brand-soft text-brand-text",
+    tags: "后端服务 · 开发工具",
+  },
+  {
+    owner: "vercel",
+    name: "ai",
+    mark: "ai",
+    toneCls: "bg-ai-soft text-ai",
+    tags: "智能体 · 开发工具",
+  },
+  {
+    owner: "numpy",
+    name: "numpy",
+    mark: "nu",
+    toneCls: "bg-info-soft text-info",
+    tags: "科学计算 · 开发工具",
+  },
+];
+
+function GitHubGlyph({ className = "ico" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path
+        d="M9 20c-5 1-5-2-7-3m14 5v-4a3.5 3.5 0 0 0-1-2.8c3.4-.4 7-1.7 7-7.3a5.5 5.5 0 0 0-1.5-3.8A5 5 0 0 0 20 0s-1.3-.4-4 1.5a13 13 0 0 0-8 0C5.3-.4 4 0 4 0a5 5 0 0 0-.5 3.1A5.5 5.5 0 0 0 2 6.9c0 5.6 3.6 6.9 7 7.3A3.5 3.5 0 0 0 8 17v5"
+        transform="translate(0 1) scale(.95)"
+      />
+    </svg>
+  );
+}
+
+function CompassGlyph({ className = "ico" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m16 8-2.5 5.5L8 16l2.5-5.5Z" />
+    </svg>
+  );
+}
+
+function FolderGlyph({ className = "ico" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </svg>
+  );
+}
+
+function NoteGlyph({ className = "ico" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path d="M5 3h14a2 2 0 0 1 2 2v10l-6 6H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM15 21v-6h6M7 8h10M7 12h7" />
+    </svg>
+  );
+}
+
+function LibraryGlyph({ className = "ico" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path d="M4 4h4v16H4zM11 4h4v16h-4zM18 4l4 15-3.5 1-4-15z" />
+    </svg>
+  );
+}
 
 export const Home: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -70,125 +136,108 @@ export const Home: React.FC = () => {
     }
   };
 
-  const features = [
-    {
-      icon: <Star className="h-5 w-5 text-brand-500" />,
-      title: "收藏库",
-      description:
-        "同步 GitHub Stars 与 Forks，构建可离线浏览、可搜索、可打标签的个人收藏库。",
-    },
-    {
-      icon: <ListChecks className="h-5 w-5 text-blue-500" />,
-      title: "列表管理",
-      description:
-        "用列表组织仓库：手动整理或依据 AI 摘要智能归类，支持导出导入与迁移。",
-    },
-    {
-      icon: <Search className="h-5 w-5 text-green-600" />,
-      title: "发现与搜索",
-      description:
-        "全网搜索 GitHub 仓库，一键收藏；库内按语言、标签、类型多维筛选。",
-    },
-    {
-      icon: <Share2 className="h-5 w-5 text-purple-500" />,
-      title: "分享与 Hub",
-      description:
-        "把列表发布为公开分享链接，选择进入 Hub 广场，让别人一键复制你的精选。",
-    },
-  ];
-
   return (
-    <div className="flex flex-col items-center py-14 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-5xl w-full text-center space-y-10">
-        <div className="space-y-5">
-          <span className="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-gray-900 shadow-card mx-auto">
-            <Star className="h-9 w-9 text-brand-400" fill="currentColor" />
-          </span>
-          <h1 className="text-4xl tracking-tight font-bold text-ink sm:text-5xl">
-            <span className="block">收藏、整理并离线浏览</span>
-            <span className="block mt-1">
-              你的 <span className="text-brand-500">GitHub Stars</span>
-            </span>
+    <>
+      <div className="login-layout">
+        <section className="login-copy">
+          <h1>
+            为开源收藏，
+            <br />
+            留一个好位置。
           </h1>
-          <p className="max-w-2xl mx-auto text-base text-muted sm:text-lg">
-            把散落的 Star 变成结构化的收藏库：AI
-            自动提炼摘要与标签、列表化组织、跨设备离线同步，还能把精选分享给任何人。
+          <p>
+            将 GitHub Stars 与 Forks
+            整理成可检索的收藏库。用主题列表、个人备注和 AI
+            摘要，把“以后再看”变成“随时可用”。
           </p>
-        </div>
-
-        {error && (
-          <div className="mx-auto max-w-md rounded-lg border border-red-200 bg-red-50 p-4 text-left">
-            <div className="flex items-start">
-              <AlertCircle className="h-5 w-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-red-800">{error}</p>
-            </div>
+          <div className="login-benefits">
+            <span className="row">
+              <Search className="ico" />
+              一个入口，搜索收藏与自己的整理
+            </span>
+            <span className="row">
+              <FolderGlyph />
+              按主题归类，按需导出与分享
+            </span>
+            <span className="row">
+              <NoteGlyph />
+              记录判断，保留真正有用的线索
+            </span>
           </div>
-        )}
-
-        <div className="max-w-sm mx-auto sm:max-w-none sm:flex sm:justify-center sm:gap-4">
-          <button
-            onClick={handleLogin}
-            disabled={isLoggingIn || isDevLoggingIn}
-            className={`w-full inline-flex items-center justify-center px-8 py-3 text-base font-medium rounded-md text-white bg-gray-900 hover:bg-gray-700 sm:w-auto transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 ${
-              isLoggingIn || isDevLoggingIn ? "cursor-not-allowed" : ""
-            }`}
-          >
-            {isLoggingIn ? (
-              <span className="flex items-center">
-                <span className="animate-spin mr-3 h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
-                正在连接 GitHub…
-              </span>
-            ) : (
-              <span className="flex items-center">
-                <Github className="mr-2 h-5 w-5" />
-                使用 GitHub 登录
-              </span>
-            )}
-          </button>
-
-          {devLoginEnabled && devLoginUsername && (
-            <button
-              onClick={handleDevLogin}
-              disabled={isLoggingIn || isDevLoggingIn}
-              className={`w-full sm:w-auto inline-flex items-center justify-center px-6 py-3 border border-line-strong text-base font-medium rounded-md text-ink bg-surface hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 ${
-                isLoggingIn || isDevLoggingIn ? "cursor-not-allowed" : ""
-              }`}
-              title="本地开发登录（无需 OAuth）"
-            >
-              {isDevLoggingIn ? (
-                <span className="flex items-center">
-                  <span className="animate-spin mr-3 h-5 w-5 border-2 border-gray-600 border-t-transparent rounded-full" />
-                  登录中…
-                </span>
-              ) : (
-                <span className="flex items-center">
-                  <Terminal className="mr-2 h-5 w-5" />以 {devLoginUsername}{" "}
-                  登录
-                </span>
-              )}
-            </button>
+          {error && (
+            <div className="notice error" role="alert">
+              <AlertCircle className="ico" />
+              <span className="grow">{error}</span>
+            </div>
           )}
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 text-left">
-          {features.map((feature) => (
-            <div
-              key={feature.title}
-              className="bg-surface rounded-lg border border-line shadow-card p-5 hover:shadow-card-hover transition-shadow"
+          <div className="row wrap">
+            <button
+              type="button"
+              className="btn primary"
+              disabled={isLoggingIn || isDevLoggingIn}
+              onClick={handleLogin}
             >
-              <div className="inline-flex items-center justify-center h-9 w-9 rounded-md bg-subtle border border-line-strong">
-                {feature.icon}
+              <GitHubGlyph />
+              {isLoggingIn ? "正在连接 GitHub…" : "使用 GitHub 登录"}
+            </button>
+            <Link to="/hub" className="btn ghost">
+              <CompassGlyph />
+              先浏览公开列表
+            </Link>
+          </div>
+          {devLoginEnabled && devLoginUsername && (
+            <div className="mt16">
+              <button
+                type="button"
+                className="btn sm"
+                disabled={isLoggingIn || isDevLoggingIn}
+                onClick={() => void handleDevLogin()}
+                title="本地开发登录（无需 OAuth）"
+              >
+                {isDevLoggingIn
+                  ? "登录中…"
+                  : `以演示开发用户 ${devLoginUsername} 进入`}
+              </button>
+              <span className="tiny muted"> 仅演示开发登录</span>
+            </div>
+          )}
+          <p className="tiny" style={{ marginTop: 18, fontSize: 11 }}>
+            个人列表默认私有。发布分享快照与加入 Hub 都由你主动选择。
+          </p>
+        </section>
+        <section className="login-preview" aria-label="收藏工作台示例">
+          <div className="login-preview-head">
+            <span className="row">
+              <LibraryGlyph />
+              你的收藏库
+            </span>
+            <span className="badge">界面示例</span>
+          </div>
+          {PREVIEW_ROWS.map((r) => (
+            <div className="preview-row" key={`${r.owner}/${r.name}`}>
+              <span className={`repo-emblem ${r.toneCls}`}>{r.mark}</span>
+              <div className="grow">
+                <h3>
+                  {r.owner} / {r.name}
+                </h3>
+                <p>{r.tags}</p>
               </div>
-              <h3 className="mt-4 text-base font-semibold text-ink tracking-tight">
-                {feature.title}
-              </h3>
-              <p className="mt-2 text-sm text-muted leading-relaxed">
-                {feature.description}
-              </p>
+              <BookmarkCheck className="ico" />
             </div>
           ))}
-        </div>
+          <div className="login-preview-foot">
+            <FolderGlyph className="ico small" />
+            Agent 工具箱
+            <span className="muted" style={{ marginLeft: "auto" }}>
+              6 个仓库
+            </span>
+          </div>
+        </section>
       </div>
-    </div>
+      <div className="login-foot">
+        GitStars · 个人开源收藏工作台
+        <span style={{ margin: "0 8px" }}>·</span>把 Star 变成随时可用的知识
+      </div>
+    </>
   );
 };
