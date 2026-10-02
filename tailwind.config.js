@@ -9,22 +9,49 @@ export default {
     },
     extend: {
       colors: {
-        // Brand accent: the "star" color. Used for brand marks, star counts and
-        // AI/highlight moments — never as a large surface fill.
+        // Semantic tokens — defined once in src/index.css, theme-aware via the
+        // `.dark` class. Page code should prefer these over raw grays.
+        canvas: "var(--c-canvas)",
+        surface: "var(--c-surface)",
+        subtle: "var(--c-subtle)",
+        side: "var(--c-side)",
+        ink: "var(--c-ink)",
+        muted: "var(--c-muted)",
+        line: {
+          DEFAULT: "var(--c-line)",
+          strong: "var(--c-line-strong)",
+        },
         brand: {
-          50: "#fffbeb",
-          100: "#fef3c7",
-          200: "#fde68a",
-          300: "#fcd34d",
-          400: "#fbbf24",
-          500: "#f59e0b",
-          600: "#d97706",
-          700: "#b45309",
+          DEFAULT: "var(--c-brand)",
+          hover: "var(--c-brand-hover)",
+          soft: "var(--c-brand-soft)",
+          text: "var(--c-brand-text)",
+          contrast: "var(--c-brand-contrast)",
+        },
+        gold: {
+          DEFAULT: "var(--c-gold)",
+          soft: "var(--c-gold-soft)",
+        },
+        ai: {
+          DEFAULT: "var(--c-ai)",
+          soft: "var(--c-ai-soft)",
+        },
+        info: {
+          DEFAULT: "var(--c-info)",
+          soft: "var(--c-info-soft)",
+        },
+        danger: {
+          DEFAULT: "var(--c-danger)",
+          soft: "var(--c-danger-soft)",
         },
       },
       boxShadow: {
         card: "0 1px 2px 0 rgb(0 0 0 / 0.04)",
         "card-hover": "0 4px 12px -2px rgb(0 0 0 / 0.08)",
+        overlay: "0 12px 40px rgb(22 32 43 / 0.13)",
+      },
+      width: {
+        side: "var(--side-width, 216px)",
       },
     },
   },

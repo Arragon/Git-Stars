@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   ArrowDown,
   ArrowUp,
@@ -72,6 +72,7 @@ export const Lists: React.FC = () => {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const isOnline = useSyncStatusStore((s) => s.isOnline);
   const mountedRef = useRef(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Share / publication management (M5)
   const [shareTarget, setShareTarget] = useState<ListSummary | null>(null);
@@ -115,6 +116,16 @@ export const Lists: React.FC = () => {
     mountedRef.current = true;
     void hydrateFromCache();
   }, [hydrateFromCache]);
+
+  // Sidebar shortcuts link to /lists?list=<id> — open that list directly.
+  useEffect(() => {
+    const target = searchParams.get("list");
+    if (target && !loadingLists) {
+      void openList(target);
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, loadingLists]);
 
   useEffect(() => {
     reloadLists();

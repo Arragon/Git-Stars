@@ -9,16 +9,19 @@ import { Link } from "react-router-dom";
 import {
   Bookmark,
   Check,
+  Compass,
   ExternalLink,
-  ListChecks,
+  Folder,
+  MoreHorizontal,
+  FileText,
   RefreshCw,
   Search,
   Sparkles,
   Star,
+  WifiOff,
   X,
 } from "lucide-react";
 import {
-  createTag,
   getList,
   listLibrary,
   listLists,
@@ -35,8 +38,6 @@ import { ApiError, apiPut } from "../utils/api";
 import { summarizeProject } from "../utils/ai";
 import { useAiConfigStore } from "../store/useAiConfigStore";
 import {
-  attachTagToSaved,
-  detachTagFromSaved,
   matchCachedRepository,
   outcomeErrorLabel,
   readLibraryCache,
@@ -57,38 +58,56 @@ import {
   type LibraryFilters,
 } from "../utils/libraryFilters";
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
+import { useSyncDrawerStore } from "../store/useSyncDrawerStore";
 import { ActivityBadge } from "../components/ActivityBadge";
 import {
+  Badge,
   Button,
-  Notice,
+  Card,
+  Dialog,
   EmptyState,
   Input,
-  Select,
+  Notice,
   PageHeader,
+  Select,
+  SkeletonCard,
+  Textarea,
 } from "../components/ui";
 
 const resultKey = (r: SearchItemView): string =>
   `${r.identity.providerType}:${r.identity.remoteId}`;
 
-const NoteEditor: React.FC<{
-  initial?: string;
-  onSave: (note: string) => void;
-}> = ({ initial, onSave }) => {
-  const [value, setValue] = useState(initial ?? "");
-  useEffect(() => setValue(initial ?? ""), [initial]);
-  return (
-    <input
-      className="w-full text-xs border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-      placeholder="备注..."
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={() => value !== (initial ?? "") && onSave(value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-      }}
-    />
-  );
+const LANG_DOTS: Record<string, string> = {
+  TypeScript: "#3178a9",
+  JavaScript: "#b59438",
+  Python: "#b59438",
+  Rust: "#b46f52",
+  Go: "#32829a",
+  Java: "#9763a7",
+  "C++": "#9763a7",
+  C: "#6b7781",
+  PHP: "#8188b5",
+  Shell: "#6b7781",
+  HTML: "#c0653a",
+  CSS: "#5a7fa8",
+  Vue: "#4d9565",
+  MATLAB: "#c0653a",
 };
+
+const CARD_TONES = ["brand", "ai", "gold", "info"] as const;
+
+function repoEmblem(name: string) {
+  const initials = name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2) || "??";
+  const hash = Array.from(name).reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  const tone = CARD_TONES[hash % CARD_TONES.length];
+  const toneCls = {
+    brand: "bg-brand-soft text-brand-text",
+    ai: "bg-ai-soft text-ai",
+    gold: "bg-gold-soft text-gold",
+    info: "bg-info-soft text-info",
+  }[tone];
+  return { initials: initials.toLowerCase(), toneCls };
+}
 
 interface BatchState {
   mode: "missing" | "all";
@@ -102,6 +121,7 @@ export const Library: React.FC = () => {
   const [items, setItems] = useState<SavedRepository[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [filters, setFilters] = useState<LibraryFilters>(EMPTY_LIBRARY_FILTERS);
+  const [view, setView] = useState<"grid" | "row">("grid");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -111,8 +131,12 @@ export const Library: React.FC = () => {
   const [saveable, setSaveable] = useState<Map<string, string>>(new Map());
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [noteFor, setNoteFor] = useState<SavedRepository | null>(null);
   const isOnline = useSyncStatusStore((s) => s.isOnline);
   const isAiConfigured = useAiConfigStore((s) => s.isConfigured());
+  const toggleSyncDrawer = useSyncDrawerStore((s) => s.toggle);
   const mountedRef = useRef(false);
 
   // --- List memberships (quick add/remove from cards) ---
@@ -131,6 +155,12 @@ export const Library: React.FC = () => {
 
   const setFilter = (patch: Partial<LibraryFilters>) =>
     setFilters((f) => ({ ...f, ...patch }));
+
+  const filterCount =
+    (filters.language ? 1 : 0) +
+    (filters.provider ? 1 : 0) +
+    (filters.tag ? 1 : 0) +
+    filters.aiTags.length;
 
   /** Reflect the local cache into the view (optimistic/offline state). */
   const hydrateFromCache = useCallback(async () => {
@@ -158,7 +188,6 @@ export const Library: React.FC = () => {
       setTags(tg);
       setError("");
       setNotice("");
-      // Keep the local cache coherent (stale-while-revalidate write-back).
       try {
         await Promise.all([upsertLibraryPage(lib), upsertTags(tg)]);
       } catch {
@@ -179,7 +208,6 @@ export const Library: React.FC = () => {
     }
   }, [filters, hydrateFromCache]);
 
-  // Stale-while-revalidate: paint the cached view immediately on first mount.
   useEffect(() => {
     if (mountedRef.current) return;
     mountedRef.current = true;
@@ -190,7 +218,6 @@ export const Library: React.FC = () => {
     void reload();
   }, [reload]);
 
-  // Lists + membership map (for the per-card quick add/remove).
   const loadLists = useCallback(async () => {
     try {
       const summaries = await listLists();
@@ -209,7 +236,6 @@ export const Library: React.FC = () => {
       }
       setMemberships(map);
     } catch {
-      // best-effort: the quick-list UI hides when lists fail to load
       setLists([]);
     }
   }, []);
@@ -234,7 +260,6 @@ export const Library: React.FC = () => {
 
   const syncNow = () => run(() => syncProvider("github"));
 
-  /** Run an offline-capable mutation: reload after confirm, hydrate otherwise. */
   const mutate = async (fn: () => Promise<MutationOutcome<unknown>>) => {
     setError("");
     setNotice("");
@@ -267,8 +292,6 @@ export const Library: React.FC = () => {
     try {
       const r = await searchRepositories(query.trim());
       setResults(r.items);
-      // Resolve which results can be saved: the library API needs a local
-      // repository id, which only synced repositories have.
       const map = new Map<string, string>();
       for (const item of r.items) {
         try {
@@ -278,7 +301,7 @@ export const Library: React.FC = () => {
           );
           if (cached) map.set(resultKey(item), cached.id);
         } catch {
-          /* cache unavailable — nothing saveable */
+          /* cache unavailable */
         }
       }
       setSaveable(map);
@@ -307,8 +330,6 @@ export const Library: React.FC = () => {
     setSavingKey(null);
   };
 
-  // --- Quick list membership toggle (network-only: membership map is
-  // server-derived; offline queuing would desync the read model) ---
   const toggleListMembership = async (savedId: string, listId: string) => {
     const member = memberships.get(savedId)?.has(listId);
     if (listToggleBusy) return;
@@ -399,45 +420,54 @@ export const Library: React.FC = () => {
     }
 
     setBatch((b) => (b ? { ...b, current: "" } : b));
-    // Persist final AI state into the local cache (best-effort).
     try {
       await upsertLibraryPage(itemsRef.current);
     } catch {
-      // cache write is best-effort
+      // best-effort
     }
-    if (batchStopRef.current) {
-      setNotice(
-        `批量总结已暂停：完成 ${done}/${targets.length}` +
-          (failed ? `，失败 ${failed}` : ""),
-      );
-    } else {
-      setNotice(
-        `批量总结完成：${done - failed} 成功` +
-          (failed ? `，${failed} 失败` : ""),
-      );
-    }
+    setNotice(
+      batchStopRef.current
+        ? `批量总结已暂停：完成 ${done}/${targets.length}` +
+            (failed ? `，失败 ${failed}` : "")
+        : `批量总结完成：${done - failed} 成功` +
+            (failed ? `，${failed} 失败` : ""),
+    );
     setTimeout(() => setBatch(null), 2500);
   };
 
   const languages = useMemo(() => collectLanguages(items), [items]);
   const aiTagOptions = useMemo(() => collectAiTags(items), [items]);
   const stats = useMemo(() => computeLibraryStats(items), [items]);
-  const activeFilterCount =
-    (filters.search ? 1 : 0) +
-    (filters.kind ? 1 : 0) +
-    (filters.language ? 1 : 0) +
-    (filters.tag ? 1 : 0) +
-    filters.aiTags.length;
+
+  const saveNote = async (saved: SavedRepository, note: string) => {
+    setError("");
+    const out = await updateSavedFields(
+      { id: saved.id, version: saved.version },
+      { note },
+    );
+    if (out.error) {
+      setError(outcomeErrorLabel(out));
+      return false;
+    }
+    if (!out.confirmed) setNotice("离线：更改已保存到本地，联网后自动同步");
+    await hydrateFromCache();
+    return true;
+  };
 
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-5 text-gray-900 dark:text-gray-100">
+    <div className="space-y-4">
       <PageHeader
-        title="Library"
-        description="收藏、整理并离线浏览你的 GitHub 仓库"
+        title="收藏库"
+        badge={`${stats.total}`}
+        description="快速找到之前收藏的仓库，判断用途，完成整理"
       >
+        <Button variant="secondary" onClick={() => setDiscoverOpen((v) => !v)}>
+          <Compass className="h-4 w-4" />
+          发现仓库
+        </Button>
         {batch ? (
           <Button
-            variant="danger"
+            variant="danger-solid"
             onClick={() => {
               batchStopRef.current = true;
             }}
@@ -446,46 +476,32 @@ export const Library: React.FC = () => {
           </Button>
         ) : (
           <details className="relative">
-            <summary className="inline-flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-purple-700 cursor-pointer list-none">
-              <Sparkles className="h-4 w-4" /> AI 批量总结
+            <summary className="inline-flex items-center gap-[7px] min-h-[36px] px-3 rounded-[7px] border border-transparent text-ai text-[13px] font-medium cursor-pointer list-none hover:bg-ai-soft">
+              <Sparkles className="h-4 w-4" /> AI 摘要
             </summary>
-            <div className="absolute right-0 z-20 mt-1 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg py-1 text-sm">
-              <button
-                type="button"
-                onClick={() =>
-                  void startBatchSummarize("missing").then(() => {
-                    const el = document.activeElement as HTMLElement | null;
-                    el?.blur();
-                  })
-                }
-                className="block w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700"
+            <div className="absolute right-0 z-20 mt-1 w-56 bg-surface border border-line rounded-lg shadow-[box-shadow] py-1 text-sm">
+              <Button
+                variant="ghost"
+                className="w-full !justify-start"
+                onClick={() => void startBatchSummarize("missing")}
               >
                 补充缺失总结
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  void startBatchSummarize("all").then(() => {
-                    const el = document.activeElement as HTMLElement | null;
-                    el?.blur();
-                  })
-                }
-                className="block w-full text-left px-3 py-2 text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full !justify-start text-danger"
+                onClick={() => void startBatchSummarize("all")}
               >
                 全部重新生成…
-              </button>
+              </Button>
             </div>
           </details>
         )}
-        <Button onClick={() => void syncNow()} disabled={busy}>
-          <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
-          Sync GitHub
-        </Button>
       </PageHeader>
 
       {batch && (
-        <div className="bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900 rounded px-3 py-2">
-          <div className="flex items-center justify-between text-xs text-purple-900 dark:text-purple-200 mb-1">
+        <div className="bg-ai-soft text-ai rounded-[9px] px-4 py-3 text-xs mb-4">
+          <div className="flex items-center justify-between mb-2">
             <span>
               {batch.current
                 ? `正在总结：${batch.current}`
@@ -498,9 +514,9 @@ export const Library: React.FC = () => {
               {batch.failed ? ` · 失败 ${batch.failed}` : ""}
             </span>
           </div>
-          <div className="h-1.5 bg-purple-200 dark:bg-purple-900 rounded overflow-hidden">
+          <div className="h-[5px] rounded-full bg-surface overflow-hidden">
             <div
-              className="h-full bg-purple-600 transition-all"
+              className="h-full bg-ai transition-[width] duration-200"
               style={{
                 width: `${batch.total ? (batch.done / batch.total) * 100 : 0}%`,
               }}
@@ -511,452 +527,686 @@ export const Library: React.FC = () => {
 
       {error && <Notice tone="error">{error}</Notice>}
       {notice && <Notice tone="info">{notice}</Notice>}
-
-      <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-3">
-        <div className="flex gap-2">
-          <Input
-            placeholder="Discover repositories on GitHub..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void onSearch();
-            }}
-          />
-          <Button variant="secondary" onClick={() => void onSearch()}>
-            <Search className="h-4 w-4" /> Search
+      {!isOnline && (
+        <Notice tone="warning">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span className="flex-1">
+            正在查看本地缓存。备注与标签的更改会在联网后同步。
+          </span>
+          <Button variant="ghost" size="xs" onClick={toggleSyncDrawer}>
+            查看待同步项
           </Button>
-        </div>
-        {results && (
-          <ul className="mt-3 divide-y divide-gray-100 dark:divide-gray-800">
-            {results.map((r) => {
-              const key = resultKey(r);
-              const saved = savedKeys.has(key);
-              return (
-                <li
-                  key={key}
-                  className="py-2 flex items-center justify-between gap-2"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">
-                      {r.namespacePath ? `${r.namespacePath}/` : ""}
-                      {r.name}
+        </Notice>
+      )}
+
+      {/* Discover panel (source search, toggled from page header) */}
+      {discoverOpen && (
+        <Card className="p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-muted">
+              来源发现 · 搜索 GitHub 仓库
+            </span>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => setDiscoverOpen(false)}
+            >
+              <X className="h-3.5 w-3.5" /> 收起
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Input
+              placeholder="搜索 GitHub 仓库..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void onSearch();
+              }}
+            />
+            <Button onClick={() => void onSearch()}>
+              <Search className="h-4 w-4" /> Search
+            </Button>
+          </div>
+          {results && (
+            <ul className="mt-3 divide-y divide-line">
+              {results.map((r) => {
+                const key = resultKey(r);
+                const saved = savedKeys.has(key);
+                const repositoryId = saveable.get(key);
+                return (
+                  <li
+                    key={key}
+                    className="py-2 flex items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">
+                        {r.namespacePath ? `${r.namespacePath}/` : ""}
+                        {r.name}
+                      </div>
+                      <div className="text-xs text-muted truncate">
+                        {r.description}
+                      </div>
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                      {r.description}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {saved ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/50 border border-green-200 dark:border-green-900 rounded px-2 py-1">
-                        <Check className="h-3 w-3" /> 已收藏
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => void onSaveResult(r)}
-                        disabled={
-                          !saveable.get(key) || !isOnline || savingKey === key
-                        }
-                        title={
-                          !isOnline
-                            ? "离线状态暂不支持收藏"
-                            : !saveable.get(key)
-                              ? "该仓库尚未同步到本地目录，暂不能收藏"
-                              : "收藏到我的库"
-                        }
-                        className="inline-flex items-center gap-1 text-xs bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white px-2 py-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                    <div className="flex items-center gap-2 shrink-0">
+                      {saved ? (
+                        <Badge tone="success">
+                          <Check className="h-3 w-3" /> 已收藏
+                        </Badge>
+                      ) : (
+                        <Button
+                          size="xs"
+                          onClick={() => void onSaveResult(r)}
+                          disabled={
+                            !repositoryId || !isOnline || savingKey === key
+                          }
+                          title={
+                            !isOnline
+                              ? "离线状态暂不支持收藏"
+                              : !repositoryId
+                                ? "该仓库尚未同步到本地目录；先在 GitHub 收藏并同步后即可加入"
+                                : "收藏到我的库"
+                          }
+                        >
+                          <Bookmark className="h-3 w-3" /> 收藏
+                        </Button>
+                      )}
+                      <a
+                        href={r.webUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-info hover:underline"
                       >
-                        <Bookmark className="h-3 w-3" /> 收藏
+                        <ExternalLink className="h-3 w-3" /> Open
+                      </a>
+                    </div>
+                  </li>
+                );
+              })}
+              {results.length === 0 && (
+                <li className="py-2 text-sm text-muted">No results.</li>
+              )}
+            </ul>
+          )}
+        </Card>
+      )}
+
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+          <Input
+            className="pl-[38px]"
+            placeholder="搜索收藏库…"
+            value={filters.search}
+            onChange={(e) => setFilter({ search: e.target.value })}
+          />
+        </div>
+        <div className="inline-flex items-center bg-subtle p-[3px] rounded-[7px] gap-0.5">
+          {[
+            { value: "", label: "全部" },
+            { value: "star", label: "Star" },
+            { value: "fork", label: "Fork" },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setFilter({ kind: opt.value })}
+              className={`px-3 py-1 rounded-[5px] text-xs min-h-[30px] transition-colors ${
+                filters.kind === opt.value
+                  ? "bg-surface text-ink shadow-sm font-medium"
+                  : "text-muted hover:text-ink"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className="relative">
+          <Button
+            variant={filterCount > 0 ? "primary" : "secondary"}
+            onClick={() => setFilterOpen((v) => !v)}
+            aria-expanded={filterOpen}
+          >
+            筛选{filterCount > 0 ? ` · ${filterCount}` : ""}
+          </Button>
+          {filterOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setFilterOpen(false)}
+              />
+              <Card className="absolute right-0 top-11 z-30 w-[310px] p-[19px] shadow-[0_12px_40px_rgb(22_32_43/0.13)]">
+                <div className="flex items-center justify-between mb-3.5">
+                  <h3 className="text-[15px] font-semibold">筛选收藏库</h3>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setFilterOpen(false)}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <label className="flex flex-col gap-1.5 text-xs font-semibold my-3">
+                  来源平台
+                  <Select
+                    value={filters.provider}
+                    onChange={(e) => setFilter({ provider: e.target.value })}
+                    className="w-full font-normal"
+                  >
+                    <option value="">全部平台</option>
+                    <option value="github">GitHub</option>
+                    <option value="gitlab">GitLab</option>
+                    <option value="gitee">Gitee</option>
+                  </Select>
+                </label>
+                <label className="flex flex-col gap-1.5 text-xs font-semibold my-3">
+                  语言
+                  <Select
+                    value={filters.language}
+                    onChange={(e) => setFilter({ language: e.target.value })}
+                    className="w-full font-normal"
+                  >
+                    <option value="">全部语言</option>
+                    {languages.map((lang) => (
+                      <option key={lang} value={lang}>
+                        {lang}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="flex flex-col gap-1.5 text-xs font-semibold my-3">
+                  手动标签
+                  <Select
+                    value={filters.tag}
+                    onChange={(e) => setFilter({ tag: e.target.value })}
+                    className="w-full font-normal"
+                  >
+                    <option value="">全部手动标签</option>
+                    {tags.map((t) => (
+                      <option key={t.id} value={t.name}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <div className="text-xs text-muted mt-4 mb-2">
+                  AI 标签 · 需包含全部选中标签
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {aiTagOptions.map((tag) => {
+                    const selected = filters.aiTags.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        onClick={() =>
+                          setFilter({
+                            aiTags: selected
+                              ? filters.aiTags.filter((t) => t !== tag)
+                              : [...filters.aiTags, tag],
+                          })
+                        }
+                        aria-pressed={selected}
+                        className={`inline-flex items-center gap-1 border rounded-[5px] px-2 py-1 text-[11px] transition-colors ${
+                          selected
+                            ? "bg-brand-soft text-brand-text border-brand"
+                            : "bg-surface text-muted border-line hover:text-ink hover:border-line-strong"
+                        }`}
+                      >
+                        {tag}
                       </button>
-                    )}
-                    <a
-                      href={r.webUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                      <ExternalLink className="h-3 w-3" /> Open
-                    </a>
-                  </div>
-                </li>
-              );
-            })}
-            {results.length === 0 && (
-              <li className="py-2 text-sm text-gray-500 dark:text-gray-400">
-                No results.
-              </li>
-            )}
-          </ul>
-        )}
+                    );
+                  })}
+                </div>
+                <div className="flex items-center justify-between mt-6">
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() =>
+                      setFilters({
+                        ...EMPTY_LIBRARY_FILTERS,
+                        sort: filters.sort,
+                      })
+                    }
+                  >
+                    清除条件
+                  </Button>
+                  <Button size="sm" onClick={() => setFilterOpen(false)}>
+                    完成
+                  </Button>
+                </div>
+              </Card>
+            </>
+          )}
+        </div>
+        <Select
+          value={filters.sort}
+          onChange={(e) =>
+            setFilter({ sort: e.target.value as LibraryFilters["sort"] })
+          }
+        >
+          <option value="added_at">最近添加</option>
+          <option value="stars">Star 最多</option>
+          <option value="name">名称</option>
+        </Select>
+        <div className="flex border border-line rounded-[7px] p-[2px] bg-surface ml-auto">
+          {(
+            [
+              { v: "grid", icon: <Compass className="h-4 w-4 rotate-45" /> },
+              { v: "row", icon: <Folder className="h-4 w-4" /> },
+            ] as const
+          ).map(({ v }) => (
+            <button
+              key={v}
+              aria-label={v === "grid" ? "卡片视图" : "列表视图"}
+              onClick={() => setView(v)}
+              className={`w-[31px] h-[30px] grid place-items-center rounded-[5px] transition-colors ${
+                view === v ? "bg-subtle text-ink" : "text-muted hover:text-ink"
+              }`}
+            >
+              {v === "grid" ? (
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.65"
+                >
+                  <rect x="3" y="3" width="7" height="7" rx="1" />
+                  <rect x="14" y="3" width="7" height="7" rx="1" />
+                  <rect x="3" y="14" width="7" height="7" rx="1" />
+                  <rect x="14" y="14" width="7" height="7" rx="1" />
+                </svg>
+              ) : (
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.65"
+                >
+                  <path d="M8 6h13M8 12h13M8 18h13M3 6h.1M3 12h.1M3 18h.1" />
+                </svg>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* In-library filter bar */}
-      <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-3 space-y-3">
-        <div className="flex flex-wrap gap-2">
-          <div className="relative flex-1 min-w-[14rem]">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              className="pl-8"
-              placeholder="在收藏库中搜索（名称 / 描述 / AI 摘要 / 备注）..."
-              value={filters.search}
-              onChange={(e) => setFilter({ search: e.target.value })}
-            />
-          </div>
-          <div className="flex rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden text-sm">
-            {[
-              { value: "", label: "全部" },
-              { value: "star", label: "Star" },
-              { value: "fork", label: "Fork" },
-            ].map((opt) => (
+      {/* AI tag strip */}
+      {aiTagOptions.length > 0 && (
+        <div className="flex items-center gap-[7px] flex-wrap mb-4 text-[11px]">
+          <span className="text-muted inline-flex items-center gap-1">
+            <Sparkles className="h-3 w-3" /> AI 标签
+          </span>
+          {aiTagOptions.slice(0, 12).map((tag) => {
+            const selected = filters.aiTags.includes(tag);
+            return (
               <button
-                key={opt.value}
-                onClick={() => setFilter({ kind: opt.value })}
-                className={`px-3 py-2 transition-colors ${
-                  filters.kind === opt.value
-                    ? "bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white"
-                    : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                key={tag}
+                onClick={() =>
+                  setFilter({
+                    aiTags: selected
+                      ? filters.aiTags.filter((t) => t !== tag)
+                      : [...filters.aiTags, tag],
+                  })
+                }
+                aria-pressed={selected}
+                className={`inline-flex items-center gap-1 border rounded-[5px] px-2 py-1 transition-colors ${
+                  selected
+                    ? "bg-brand-soft text-brand-text border-brand"
+                    : "bg-surface text-muted border-line hover:text-ink hover:border-line-strong"
                 }`}
               >
-                {opt.label}
+                {tag}
               </button>
-            ))}
-          </div>
-          <Select
-            value={filters.provider}
-            onChange={(e) => setFilter({ provider: e.target.value })}
-          >
-            <option value="">All providers</option>
-            <option value="github">GitHub</option>
-            <option value="gitlab">GitLab</option>
-            <option value="gitee">Gitee</option>
-          </Select>
-          <Select
-            value={filters.language}
-            onChange={(e) => setFilter({ language: e.target.value })}
-          >
-            <option value="">All languages</option>
-            {languages.map((lang) => (
-              <option key={lang} value={lang}>
-                {lang}
-              </option>
-            ))}
-          </Select>
-          <Select
-            value={filters.tag}
-            onChange={(e) => setFilter({ tag: e.target.value })}
-          >
-            <option value="">All tags</option>
-            {tags.map((t) => (
-              <option key={t.id} value={t.name}>
-                {t.name}
-              </option>
-            ))}
-          </Select>
-          <Select
-            value={filters.sort}
-            onChange={(e) =>
-              setFilter({ sort: e.target.value as LibraryFilters["sort"] })
-            }
-          >
-            <option value="added_at">Sort: Recently added</option>
-            <option value="stars">Sort: Stars</option>
-            <option value="name">Sort: Name</option>
-          </Select>
+            );
+          })}
+          {aiTagOptions.length > 12 && (
+            <button
+              onClick={() => setFilterOpen(true)}
+              className="inline-flex items-center border border-line rounded-[5px] px-2 py-1 text-muted bg-surface hover:text-ink"
+            >
+              等 {aiTagOptions.length} 个
+            </button>
+          )}
+          {filterCount + (filters.search ? 1 : 0) > 0 && (
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() =>
+                setFilters({ ...EMPTY_LIBRARY_FILTERS, sort: filters.sort })
+              }
+            >
+              清除全部筛选
+            </Button>
+          )}
         </div>
+      )}
 
-        {aiTagOptions.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-gray-500 dark:text-gray-400 inline-flex items-center gap-1">
-              <Sparkles className="h-3 w-3" /> AI 标签：
-            </span>
-            {aiTagOptions.map((tag) => {
-              const selected = filters.aiTags.includes(tag);
-              return (
-                <button
-                  key={tag}
-                  onClick={() =>
-                    setFilter({
-                      aiTags: selected
-                        ? filters.aiTags.filter((t) => t !== tag)
-                        : [...filters.aiTags, tag],
-                    })
-                  }
-                  className={`inline-flex items-center px-2 py-0.5 rounded text-xs border transition-colors ${
-                    selected
-                      ? "bg-purple-600 border-purple-600 text-white"
-                      : "bg-purple-50 dark:bg-purple-950/40 border-purple-200 dark:border-purple-900 text-purple-800 dark:text-purple-200 hover:border-purple-400"
-                  }`}
-                >
-                  {tag}
-                </button>
-              );
-            })}
-            {activeFilterCount > 0 && (
-              <button
+      {/* Results line */}
+      <div className="flex items-center justify-between border-t border-line pt-3 mb-4 text-[11px] text-muted">
+        <span>
+          {items.length} 个结果 · 库共 {stats.total} 个收藏 · ★{" "}
+          {formatCount(stats.stars)} · {formatCount(stats.forks)} forks
+        </span>
+        {lists.length > 0 && <span>{lists.length} 个列表</span>}
+      </div>
+
+      {/* Content */}
+      {loading ? (
+        <div
+          className={
+            view === "grid"
+              ? "grid grid-cols-1 min-[1251px]:grid-cols-2 min-[1701px]:grid-cols-3 gap-3.5"
+              : "space-y-2"
+          }
+        >
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={filters.search || filterCount > 0 ? <Search /> : <Star />}
+          title={
+            filters.search || filterCount > 0
+              ? "没有符合筛选条件的仓库"
+              : "收藏库还是空的"
+          }
+          description={
+            filters.search || filterCount > 0
+              ? "试试调整搜索词或清除筛选条件。"
+              : "同步你的 GitHub Stars 和 Forks，构建可离线使用的收藏库。"
+          }
+          action={
+            filters.search || filterCount > 0 ? (
+              <Button
                 onClick={() =>
                   setFilters({ ...EMPTY_LIBRARY_FILTERS, sort: filters.sort })
                 }
-                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
               >
-                清除筛选（{activeFilterCount}）
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-          <span title="收藏仓库数">
-            <strong className="text-gray-900 dark:text-gray-100">
-              {stats.total}
-            </strong>{" "}
-            repos
-          </span>
-          <span title="Stars 总和">
-            <Star className="h-3 w-3 inline mr-0.5 -mt-0.5" />
-            <strong className="text-gray-900 dark:text-gray-100">
-              {formatCount(stats.stars)}
-            </strong>
-          </span>
-          <span title="Forks 总和">
-            <strong className="text-gray-900 dark:text-gray-100">
-              {formatCount(stats.forks)}
-            </strong>{" "}
-            forks
-          </span>
-          {lists.length > 0 && (
-            <span className="ml-auto inline-flex items-center gap-1">
-              <ListChecks className="h-3 w-3" /> {lists.length} 个列表
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 items-start">
-        {items.map((it) => {
-          const memberLists = memberships.get(it.id);
-          return (
-            <div
-              key={it.id}
-              className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-3 flex flex-col gap-2 hover:border-gray-300 dark:hover:border-gray-700 transition-colors"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <Link
-                    to={`/repository/${it.repository.id}`}
-                    className="text-sm font-semibold hover:underline block truncate"
-                    title={`${it.repository.namespacePath ? `${it.repository.namespacePath}/` : ""}${it.repository.name}`}
+                清除筛选
+              </Button>
+            ) : (
+              <Button onClick={() => void syncNow()} disabled={busy}>
+                <RefreshCw
+                  className={`h-4 w-4 ${busy ? "animate-spin" : ""}`}
+                />
+                同步 GitHub Stars
+              </Button>
+            )
+          }
+        />
+      ) : view === "grid" ? (
+        <div className="grid grid-cols-1 min-[1251px]:grid-cols-2 min-[1701px]:grid-cols-3 gap-3.5">
+          {items.map((it) => {
+            const emblem = repoEmblem(it.repository.name);
+            const memberLists = memberships.get(it.id);
+            return (
+              <Card
+                key={it.id}
+                hover
+                className="p-[17px] pb-3 flex flex-col relative"
+              >
+                <div className="flex items-start gap-2.5 mb-3 min-w-0">
+                  <span
+                    className={`grid place-items-center w-[35px] h-[35px] shrink-0 rounded-[9px] text-[13px] font-[650] ${emblem.toneCls}`}
                   >
-                    {it.repository.namespacePath
-                      ? `${it.repository.namespacePath}/`
-                      : ""}
-                    {it.repository.name}
-                  </Link>
-                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-2 flex-wrap">
-                    <span className="uppercase">
-                      {it.repository.providerType}
-                    </span>
-                    <span className="inline-flex items-center gap-0.5">
-                      <Star className="h-3 w-3" />
-                      {it.repository.starsCount}
-                    </span>
-                    {it.repository.primaryLanguage && (
-                      <span className="truncate">
-                        {it.repository.primaryLanguage}
-                      </span>
-                    )}
-                    <ActivityBadge
-                      owner={it.repository.namespacePath}
-                      repo={it.repository.name}
-                    />
-                    {it.repository.visibility === "private" && (
-                      <span className="text-amber-600 dark:text-amber-400">
-                        private
-                      </span>
-                    )}
+                    {emblem.initials}
+                  </span>
+                  <div className="flex-1 min-w-0 pr-5">
+                    <Link
+                      to={`/repository/${it.repository.id}`}
+                      className="text-sm leading-[1.45] font-[650] tracking-[-0.01em] block break-all hover:text-brand-text"
+                    >
+                      {it.repository.name}
+                    </Link>
+                    <div className="text-[11px] text-muted mt-0.5 flex items-center gap-1 truncate">
+                      {it.repository.namespacePath}
+                      {it.repository.visibility === "private" && (
+                        <span className="text-gold">· 私有</span>
+                      )}
+                    </div>
                   </div>
                 </div>
-                <button
-                  onClick={() => {
-                    if (!window.confirm("确定将该仓库从收藏移除？")) return;
-                    runMutation(() =>
-                      unsaveRepository({ id: it.id, version: it.version }),
-                    );
-                  }}
-                  disabled={busy}
-                  className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 shrink-0 disabled:opacity-50"
-                  title="Remove from library"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              {it.repository.description && (
-                <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
-                  {it.repository.description}
-                </p>
-              )}
-
-              {it.aiSummary && (
-                <div className="text-xs bg-purple-50 dark:bg-purple-950/40 border border-purple-100 dark:border-purple-900 rounded px-2 py-1.5 text-purple-900 dark:text-purple-200 line-clamp-3">
-                  <Sparkles className="h-3 w-3 inline mr-1 -mt-0.5" />
-                  {it.aiSummary}
+                {it.repository.description && (
+                  <p className="text-xs text-muted leading-[1.7] line-clamp-2 min-h-[41px] mb-3 break-all">
+                    {it.repository.description}
+                  </p>
+                )}
+                {it.aiSummary && (
+                  <div className="text-xs bg-ai-soft text-ai rounded-md px-2 py-1.5 mb-3 line-clamp-2">
+                    <Sparkles className="h-3 w-3 inline mr-1 -mt-0.5" />
+                    {it.aiSummary}
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5 min-h-[23px] mb-3 overflow-hidden">
+                  {it.aiTags.slice(0, 2).map((name) => (
+                    <Badge key={`ai-${name}`} tone="ai">
+                      {name}
+                    </Badge>
+                  ))}
+                  {it.tags.slice(0, 1).map((t) => (
+                    <Badge key={t.id}>{t.name}</Badge>
+                  ))}
                 </div>
-              )}
-
-              <div className="flex flex-wrap items-center gap-1.5">
-                {it.aiTags.map((name) => (
-                  <span
-                    key={`ai-${name}`}
-                    title="AI 标签（重新生成时更新）"
-                    className="inline-flex items-center gap-0.5 bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 text-xs rounded px-1.5 py-0.5"
-                  >
-                    <Sparkles className="h-3 w-3" />
-                    {name}
+                <div className="flex items-center gap-3 text-[11px] text-muted mt-auto pb-3">
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      className="w-[7px] h-[7px] rounded-full inline-block"
+                      style={{
+                        background:
+                          LANG_DOTS[it.repository.primaryLanguage ?? ""] ??
+                          "var(--c-muted)",
+                      }}
+                    />
+                    {it.repository.primaryLanguage || "—"}
                   </span>
-                ))}
-                {it.tags.map((t) => (
-                  <span
-                    key={t.id}
-                    className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-xs rounded px-2 py-0.5"
-                  >
-                    {t.name}
-                    <button
-                      onClick={() =>
-                        runMutation(() => detachTagFromSaved(it.id, t.id))
-                      }
-                      disabled={busy}
-                      className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
+                  <span className="inline-flex items-center gap-1">
+                    <Star className="h-3 w-3" />
+                    {formatCount(it.repository.starsCount)}
                   </span>
-                ))}
-                <input
-                  className="text-xs border border-dashed border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 w-24 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-400"
-                  placeholder="+ tag"
-                  disabled={busy}
-                  onKeyDown={async (e) => {
-                    if (e.key !== "Enter") return;
-                    const name = (e.target as HTMLInputElement).value.trim();
-                    if (!name) return;
-                    (e.target as HTMLInputElement).value = "";
-                    const existing = tags.find((t) => t.name === name);
-                    if (!existing && !isOnline) {
-                      setError("离线状态暂不支持新建标签，请联网后重试");
-                      return;
-                    }
-                    setBusy(true);
-                    try {
-                      const tag = existing ?? (await createTag(name));
-                      await mutate(() => attachTagToSaved(it.id, tag.id));
-                    } catch (err) {
-                      setError(
-                        err instanceof ApiError
-                          ? `${err.code}: ${err.message}`
-                          : "操作失败，请重试",
-                      );
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
-                />
-              </div>
-
-              {lists.length > 0 && (
-                <div className="relative">
-                  <button
-                    type="button"
+                  <ActivityBadge
+                    owner={it.repository.namespacePath}
+                    repo={it.repository.name}
+                  />
+                </div>
+                <div className="border-t border-line pt-2 flex items-center justify-between gap-1">
+                  <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={() =>
                       setListMenuFor((cur) => (cur === it.id ? null : it.id))
                     }
-                    className="inline-flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800"
-                    title="加入 / 移出列表"
                   >
-                    <ListChecks className="h-3.5 w-3.5" />
-                    Lists
-                    {memberLists && memberLists.size > 0 && (
-                      <span className="bg-blue-600 text-white rounded-full text-[10px] px-1.5 leading-4">
-                        {memberLists.size}
-                      </span>
-                    )}
-                  </button>
-                  {listMenuFor === it.id && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-10"
-                        onClick={() => setListMenuFor(null)}
-                      />
-                      <div className="absolute left-0 top-full z-20 mt-1 w-56 max-h-64 overflow-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg py-1 text-sm">
-                        {lists.map((list) => {
-                          const member = memberLists?.has(list.id) ?? false;
-                          return (
-                            <button
-                              key={list.id}
-                              type="button"
-                              disabled={
-                                listToggleBusy === `${it.id}:${list.id}` ||
-                                !isOnline
-                              }
-                              onClick={() =>
-                                void toggleListMembership(it.id, list.id)
-                              }
-                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-left"
-                            >
-                              <span className="truncate">{list.name}</span>
-                              {member && (
-                                <Check className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
+                    <Folder className="h-3.5 w-3.5" />
+                    {memberLists && memberLists.size > 0
+                      ? `已在 ${memberLists.size} 个列表`
+                      : "加入列表"}
+                  </Button>
+                  <div className="flex items-center gap-0.5">
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      aria-label="编辑备注"
+                      title={it.note ? "编辑个人备注" : "添加个人备注"}
+                      onClick={() => setNoteFor(it)}
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      aria-label="更多操作"
+                      title="移出收藏库"
+                      onClick={() => {
+                        if (!window.confirm("确定将该仓库从收藏移除？")) return;
+                        runMutation(() =>
+                          unsaveRepository({ id: it.id, version: it.version }),
+                        );
+                      }}
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
-              )}
 
-              <div className="mt-auto">
-                <NoteEditor
-                  initial={it.note}
-                  onSave={(note) =>
-                    runMutation(() =>
-                      updateSavedFields(
-                        { id: it.id, version: it.version },
-                        { note },
-                      ),
-                    )
-                  }
+                {listMenuFor === it.id && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setListMenuFor(null)}
+                    />
+                    <div className="absolute left-3 bottom-12 z-20 w-56 max-h-64 overflow-auto bg-surface border border-line rounded-lg shadow-[0_12px_40px_rgb(22_32_43/0.13)] py-1 text-[13px]">
+                      {lists.length === 0 && (
+                        <div className="px-3 py-2 text-xs text-muted">
+                          还没有列表，先到「我的列表」创建一个。
+                        </div>
+                      )}
+                      {lists.map((list) => {
+                        const member = memberLists?.has(list.id) ?? false;
+                        return (
+                          <button
+                            key={list.id}
+                            type="button"
+                            disabled={
+                              listToggleBusy === `${it.id}:${list.id}` ||
+                              !isOnline
+                            }
+                            onClick={() =>
+                              void toggleListMembership(it.id, list.id)
+                            }
+                            className="w-full flex items-center justify-between px-3 py-2 hover:bg-subtle disabled:opacity-50 text-left"
+                          >
+                            <span className="truncate">{list.name}</span>
+                            {member && (
+                              <Check className="h-4 w-4 text-brand-text shrink-0" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      ) : (
+        <Card className="overflow-hidden">
+          {items.map((it) => {
+            const emblem = repoEmblem(it.repository.name);
+            const memberLists = memberships.get(it.id);
+            return (
+              <div
+                key={it.id}
+                className="grid grid-cols-[20px_minmax(0,1fr)_80px] sm:grid-cols-[20px_minmax(170px,1.6fr)_minmax(90px,0.6fr)_80px] items-center gap-3 min-h-[70px] px-4 py-3 border-b border-line last:border-b-0 hover:bg-canvas"
+              >
+                <input
+                  type="checkbox"
+                  aria-label={`选择 ${it.repository.name}`}
+                  className="hidden sm:block"
+                  onChange={() => undefined}
                 />
-              </div>
-            </div>
-          );
-        })}
-        {items.length === 0 && !loading && (
-          <EmptyState
-            className="md:col-span-2 xl:col-span-3"
-            icon={<Star />}
-            title={
-              activeFilterCount > 0
-                ? "没有符合筛选条件的仓库"
-                : "收藏库还是空的"
-            }
-            description={
-              activeFilterCount > 0
-                ? "试试清除筛选条件"
-                : "同步你的 GitHub Stars 和 Forks，构建可离线使用的收藏库。"
-            }
-            action={
-              activeFilterCount === 0 ? (
-                <Button onClick={() => void syncNow()} disabled={busy}>
-                  <RefreshCw
-                    className={`h-4 w-4 ${busy ? "animate-spin" : ""}`}
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span
+                    className={`hidden sm:grid place-items-center w-[31px] h-[31px] shrink-0 rounded-[9px] text-xs font-[650] ${emblem.toneCls}`}
+                  >
+                    {emblem.initials}
+                  </span>
+                  <div className="min-w-0">
+                    <Link
+                      to={`/repository/${it.repository.id}`}
+                      className="text-[13px] font-[650] block truncate hover:text-brand-text"
+                    >
+                      {it.repository.name}
+                    </Link>
+                    <p className="text-[11px] text-muted truncate">
+                      {it.repository.description ||
+                        it.aiSummary ||
+                        it.repository.namespacePath}
+                    </p>
+                  </div>
+                </div>
+                <span className="hidden sm:flex items-center gap-1.5 text-[11px] text-muted">
+                  <span
+                    className="w-[7px] h-[7px] rounded-full"
+                    style={{
+                      background:
+                        LANG_DOTS[it.repository.primaryLanguage ?? ""] ??
+                        "var(--c-muted)",
+                    }}
                   />
-                  同步 GitHub Stars
-                </Button>
-              ) : undefined
-            }
-          />
+                  {it.repository.primaryLanguage || "—"}
+                </span>
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted">
+                  <Star className="h-3 w-3" />
+                  {formatCount(it.repository.starsCount)}
+                </span>
+                <div className="flex items-center justify-end gap-1">
+                  <ActivityBadge
+                    owner={it.repository.namespacePath}
+                    repo={it.repository.name}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    aria-label="加入列表"
+                    onClick={() =>
+                      setListMenuFor((cur) => (cur === it.id ? null : it.id))
+                    }
+                  >
+                    <Folder className="h-3.5 w-3.5" />
+                    {memberLists?.size ?? 0}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </Card>
+      )}
+      {listMenuFor && !items.some((i) => i.id === listMenuFor) && null}
+
+      {/* Note dialog */}
+      <Dialog
+        open={noteFor !== null}
+        onClose={() => setNoteFor(null)}
+        title={noteFor ? `备注 · ${noteFor.repository.name}` : "备注"}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setNoteFor(null)}>
+              取消
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!noteFor) return;
+                const value =
+                  (
+                    document.getElementById(
+                      "note-dialog-input",
+                    ) as HTMLTextAreaElement | null
+                  )?.value ?? "";
+                const ok = await saveNote(noteFor, value);
+                if (ok) setNoteFor(null);
+              }}
+            >
+              保存
+            </Button>
+          </>
+        }
+      >
+        {noteFor && (
+          <>
+            <p className="text-xs text-muted mb-4">
+              备注属于个人数据，不会出现在公开分享中。离线时保存到本地，联网后自动同步。
+            </p>
+            <Textarea
+              id="note-dialog-input"
+              defaultValue={noteFor.note ?? ""}
+              placeholder="记录这个仓库的用途、为什么收藏……"
+            />
+          </>
         )}
-      </div>
+      </Dialog>
     </div>
   );
 };

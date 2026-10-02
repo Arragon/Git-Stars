@@ -2,15 +2,144 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+   Design tokens (GitStars redesign baseline).
+   Semantic colors are defined once here and mapped into Tailwind via
+   tailwind.config.js, so `bg-surface`, `text-ink`, `border-line` … adapt to
+   both themes without page-level dark: variants. The `.dark` class on <html>
+   is toggled by src/hooks/useTheme.ts.
+--------------------------------------------------------------------------- */
 :root {
+  --c-canvas: #f7f8fa;
+  --c-surface: #ffffff;
+  --c-subtle: #f1f3f5;
+  --c-side: #f5f5f1;
+  --c-ink: #252c33;
+  --c-muted: #637080;
+  --c-line: #e2e6eb;
+  --c-line-strong: #ced5dc;
+  --c-brand: #365e4b;
+  --c-brand-hover: #294b3b;
+  --c-brand-soft: #eaf1eb;
+  --c-brand-text: #365e4b;
+  --c-brand-contrast: #ffffff;
+  --c-gold: #956516;
+  --c-gold-soft: #fbf1dc;
+  --c-ai: #735698;
+  --c-ai-soft: #f2eef8;
+  --c-info: #426f99;
+  --c-info-soft: #edf3f8;
+  --c-danger: #ac4141;
+  --c-danger-soft: #fceeee;
+  --c-focus: #648e75;
+
   font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica,
-    Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-  line-height: 1.5;
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans", Helvetica, Arial,
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font-size: 14px;
+  line-height: 1.55;
   font-weight: 400;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color: var(--c-ink);
+}
+
+.dark {
+  --c-canvas: #15191d;
+  --c-surface: #1d2328;
+  --c-subtle: #242c33;
+  --c-side: #191f22;
+  --c-ink: #e7ebef;
+  --c-muted: #a0abb8;
+  --c-line: #303940;
+  --c-line-strong: #46525d;
+  --c-brand: #9ebea7;
+  --c-brand-hover: #bad3c1;
+  --c-brand-soft: #263b2e;
+  --c-brand-text: #b4d0bb;
+  --c-brand-contrast: #14241a;
+  --c-gold: #e1b976;
+  --c-gold-soft: #3a3020;
+  --c-ai: #c0a9e0;
+  --c-ai-soft: #31283e;
+  --c-info: #a1c0de;
+  --c-info-soft: #243443;
+  --c-danger: #eda6a6;
+  --c-danger-soft: #3c272a;
+  --c-focus: #a2c3af;
+}
+
+html {
+  scroll-behavior: smooth;
+  scrollbar-color: var(--c-line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+body {
+  margin: 0;
+  background: var(--c-canvas);
+  color: var(--c-ink);
+}
+
+::selection {
+  background: var(--c-brand-soft);
+  color: var(--c-brand-text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 3px;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 1px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--c-muted);
+  opacity: 1;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--c-brand);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- AppShell responsive sidebar width --- */
+:root {
+  --side-width: 216px;
+}
+@media (max-width: 1050px) {
+  :root {
+    --side-width: 184px;
+  }
+}
+@media (max-width: 900px) {
+  :root {
+    --side-width: 64px;
+  }
+}
+@media (max-width: 560px) {
+  :root {
+    --side-width: 0px;
+  }
 }
