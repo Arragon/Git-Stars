@@ -208,12 +208,8 @@ export const Layout: React.FC = () => {
         className={`nav-item ${active ? "active" : ""}`}
       >
         {NAV_GLYPHS[to === "/settings" ? "settings" : to.split("/")[1]]}
-        <span className="hidden min-[900px]:inline">{label}</span>
-        {count !== undefined && (
-          <span className="count number hidden min-[900px]:inline">
-            {count}
-          </span>
-        )}
+        <span>{label}</span>
+        {count !== undefined && <span className="count number">{count}</span>}
       </Link>
     );
   };
@@ -281,9 +277,7 @@ export const Layout: React.FC = () => {
             </span>
             <span className="small">
               {isOnline
-                ? pendingMutationCount
-                  ? `${pendingMutationCount} 条修改待同步`
-                  : "上次同步 · 刚刚"
+                ? "上次同步 · 刚刚"
                 : `${pendingMutationCount} 条修改待同步`}
             </span>
           </button>
