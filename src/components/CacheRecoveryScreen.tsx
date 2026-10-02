@@ -99,7 +99,7 @@ export const CacheRecoveryScreen: React.FC = () => {
   const pendingCount = pending?.length ?? 0;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6 dark:bg-gray-950">
+    <div className="flex min-h-screen items-center justify-center bg-canvas p-6">
       <div className="w-full max-w-md rounded-xl border border-gray-200 bg-surface p-6 shadow-card">
         <h1 className="text-lg font-semibold text-ink">
           {unsupported ? "本地缓存版本过新" : "本地缓存出现问题"}

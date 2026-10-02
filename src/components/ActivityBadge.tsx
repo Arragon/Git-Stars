@@ -30,8 +30,7 @@ const LEVELS: Array<{
   {
     max: 0,
     label: "沉寂",
-    className:
-      "text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700",
+    className: "text-muted border-line-strong",
   },
   {
     max: 1,
@@ -122,12 +121,12 @@ export const ActivityBadge: React.FC<{
           {level.label}
         </span>
       ) : (
-        <span className="inline-flex items-center text-xs text-gray-300 dark:text-gray-600 border border-transparent">
+        <span className="inline-flex items-center text-xs text-muted opacity-50 border border-transparent">
           <Activity className="h-3 w-3 animate-pulse" />
         </span>
       )}
       {data && (
-        <span className="pointer-events-none absolute left-1/2 bottom-full z-20 mb-1 -translate-x-1/2 hidden group-hover:block whitespace-nowrap rounded-md bg-gray-900 dark:bg-gray-700 text-white text-xs px-2.5 py-1.5 shadow-lg">
+        <span className="pointer-events-none absolute left-1/2 bottom-full z-20 mb-1 -translate-x-1/2 hidden group-hover:block whitespace-nowrap rounded-md bg-ink text-surface text-xs px-2.5 py-1.5 shadow-lg">
           近 30 天：{data.details.commits} commits · {data.details.prs} PRs ·{" "}
           {data.details.issues} issues · {data.details.releases} releases
           {data.partial && "（部分数据）"}

@@ -50,17 +50,13 @@ const Section: React.FC<{
   description?: string;
   children: React.ReactNode;
 }> = ({ icon, title, description, children }) => (
-  <section className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4 sm:p-5 space-y-4">
+  <section className="bg-surface rounded-lg border border-line p-4 sm:p-5 space-y-4">
     <div>
-      <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 inline-flex items-center gap-2">
+      <h2 className="text-base font-semibold text-ink inline-flex items-center gap-2">
         {icon}
         {title}
       </h2>
-      {description && (
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          {description}
-        </p>
-      )}
+      {description && <p className="text-xs text-muted mt-1">{description}</p>}
     </div>
     {children}
   </section>
@@ -147,7 +143,7 @@ const AiSettingsSection: React.FC = () => {
   };
 
   const inputClass =
-    "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm dark:bg-gray-800 dark:text-gray-100";
+    "mt-1 block w-full px-3 py-2 border border-line-strong rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm";
 
   return (
     <Section
@@ -157,13 +153,11 @@ const AiSettingsSection: React.FC = () => {
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block text-sm">
-          <span className="block font-medium text-gray-700 dark:text-gray-300 mb-1">
-            厂商 / 中转站
-          </span>
+          <span className="block font-medium text-ink mb-1">厂商 / 中转站</span>
           <select
             value={presetId}
             onChange={handlePresetChange}
-            className="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+            className="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-line-strong focus:outline-none focus:border-[var(--c-focus)] rounded-md"
           >
             {AI_GROUP_ORDER.map((group) => (
               <optgroup key={group} label={AI_PROVIDER_GROUP_LABELS[group]}>
@@ -180,9 +174,7 @@ const AiSettingsSection: React.FC = () => {
         </label>
 
         <label className="block text-sm">
-          <span className="block font-medium text-gray-700 dark:text-gray-300 mb-1">
-            API Key
-          </span>
+          <span className="block font-medium text-ink mb-1">API Key</span>
           <input
             type="password"
             value={apiKey}
@@ -194,9 +186,7 @@ const AiSettingsSection: React.FC = () => {
         </label>
 
         <label className="block text-sm">
-          <span className="block font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Base URL
-          </span>
+          <span className="block font-medium text-ink mb-1">Base URL</span>
           <input
             type="text"
             value={baseUrl}
@@ -207,9 +197,7 @@ const AiSettingsSection: React.FC = () => {
         </label>
 
         <div className="block text-sm">
-          <span className="block font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Model
-          </span>
+          <span className="block font-medium text-ink mb-1">Model</span>
           <div className="flex gap-2">
             <input
               type="text"
@@ -229,7 +217,7 @@ const AiSettingsSection: React.FC = () => {
                 type="button"
                 onClick={() => void handleFetchModels()}
                 disabled={modelsStatus.kind === "loading"}
-                className="shrink-0 self-stretch px-3 rounded-md border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 text-xs whitespace-nowrap"
+                className="shrink-0 self-stretch px-3 rounded-md border border-line-strong text-ink hover:bg-subtle disabled:opacity-50 text-xs whitespace-nowrap"
               >
                 {modelsStatus.kind === "loading" ? "获取中..." : "获取模型列表"}
               </button>
@@ -238,13 +226,13 @@ const AiSettingsSection: React.FC = () => {
         </div>
 
         <label className="block text-sm">
-          <span className="block font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <span className="block font-medium text-ink mb-1">
             Summary Language
           </span>
           <select
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
-            className="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+            className="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-line-strong focus:outline-none focus:border-[var(--c-focus)] rounded-md"
           >
             <option value="Simplified Chinese">
               简体中文 (Simplified Chinese)
@@ -259,13 +247,9 @@ const AiSettingsSection: React.FC = () => {
         </label>
       </div>
 
-      {preset?.hint && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          {preset.hint}
-        </p>
-      )}
+      {preset?.hint && <p className="text-xs text-muted">{preset.hint}</p>}
       {!canListModels && !preset?.hint && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-muted">
           该厂商未提供模型列表接口，请手动填写模型名。
         </p>
       )}
@@ -288,7 +272,7 @@ const AiSettingsSection: React.FC = () => {
           className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white ${
             canSave
               ? "bg-blue-600 hover:bg-blue-700"
-              : "bg-gray-300 dark:bg-gray-700 cursor-not-allowed"
+              : "bg-subtle cursor-not-allowed"
           }`}
         >
           {saved ? (
@@ -354,19 +338,15 @@ const ProvidersSection: React.FC = () => {
     >
       {error && <Notice tone="error">{error}</Notice>}
       {providers === null ? (
-        <div className="text-sm text-gray-500 dark:text-gray-400 py-2">
-          加载中...
-        </div>
+        <div className="text-sm text-muted py-2">加载中...</div>
       ) : providers.length === 0 ? (
-        <div className="text-sm text-gray-500 dark:text-gray-400 py-2">
-          暂无已连接的 Provider。
-        </div>
+        <div className="text-sm text-muted py-2">暂无已连接的 Provider。</div>
       ) : (
         <ul className="space-y-2">
           {providers.map((p) => (
             <li
               key={`${p.providerType}:${p.host}:${p.remoteUserId}`}
-              className="flex items-center justify-between gap-3 border border-gray-100 dark:border-gray-800 rounded px-3 py-2"
+              className="flex items-center justify-between gap-3 border border-line rounded px-3 py-2"
             >
               <div className="min-w-0">
                 <div className="text-sm font-medium flex items-center gap-2">
@@ -375,7 +355,7 @@ const ProvidersSection: React.FC = () => {
                     已连接
                   </span>
                 </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                <div className="text-xs text-muted truncate">
                   {p.remoteUsername} @{p.host} · scopes: {p.scopes || "—"}
                 </div>
               </div>
@@ -409,15 +389,15 @@ const AppearanceSection: React.FC = () => {
       title="外观"
       description="选择界面的配色主题。"
     >
-      <div className="inline-flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+      <div className="inline-flex bg-subtle p-1 rounded-lg">
         {options.map((opt) => (
           <button
             key={opt.value}
             onClick={() => setTheme(opt.value)}
             className={`flex-1 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
               theme === opt.value
-                ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm"
-                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                ? "bg-surface text-ink shadow-sm"
+                : "text-muted hover:text-gray-700 dark:hover:text-gray-200"
             }`}
           >
             {opt.label}
@@ -520,7 +500,7 @@ export const Settings: React.FC = () => {
   };
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 text-gray-900 dark:text-gray-100">
+    <div className="p-4 sm:p-6 space-y-5 text-ink">
       <PageHeader title="Settings" description="外观、AI、平台连接与账户管理" />
       <div className="grid grid-cols-1 min-[721px]:grid-cols-[166px_minmax(0,860px)] gap-5 sm:gap-8 items-start">
         <nav className="grid min-[721px]:sticky min-[721px]:top-[84px] gap-1 min-[721px]:grid-flow-row max-[720px]:grid-flow-col max-[720px]:overflow-auto">
@@ -542,7 +522,7 @@ export const Settings: React.FC = () => {
         <div className="min-w-0 grid gap-5">
           <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
           {user && (
-            <p className="text-sm text-gray-500 dark:text-gray-400 -mt-3">
+            <p className="text-sm text-muted -mt-3">
               {user.full_name || user.username}
             </p>
           )}
@@ -553,7 +533,7 @@ export const Settings: React.FC = () => {
 
           {tab === "account" && (
             <Section
-              icon={<User className="h-4 w-4 text-gray-500" />}
+              icon={<User className="h-4 w-4 text-muted" />}
               title="账户"
               description="导出或删除你的全部数据。"
             >
@@ -566,12 +546,12 @@ export const Settings: React.FC = () => {
                 <button
                   onClick={() => void onExport()}
                   disabled={exporting}
-                  className="inline-flex items-center gap-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 px-3 py-2 rounded disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 text-sm bg-subtle hover:bg-subtle px-3 py-2 rounded disabled:opacity-50"
                 >
                   <Download className="h-4 w-4" />
                   {exporting ? "导出中..." : "导出数据"}
                 </button>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
+                <span className="text-xs text-muted">
                   下载 JSON 格式的完整数据（收藏、备注、标签、列表、偏好设置）。
                 </span>
               </div>
@@ -590,16 +570,16 @@ export const Settings: React.FC = () => {
                       <Trash2 className="h-4 w-4" />
                       {deleting ? "处理中..." : "删除账户"}
                     </button>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                    <span className="text-xs text-muted">
                       两步确认：先获取一次性令牌，输入后才会真正删除。
                     </span>
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="text-xs text-gray-600 dark:text-gray-300">
+                    <div className="text-xs text-muted">
                       已生成一次性确认令牌。请将它输入到下方输入框以确认删除（令牌仅显示一次）：
                     </div>
-                    <code className="block text-xs bg-white dark:bg-gray-800 border border-red-200 dark:border-red-900 rounded p-2 break-all select-all font-mono text-red-700 dark:text-red-300">
+                    <code className="block text-xs bg-surface border border-red-200 dark:border-red-900 rounded p-2 break-all select-all font-mono text-red-700 dark:text-red-300">
                       {deletion.confirmation}
                     </code>
                     <div className="flex flex-wrap items-center gap-2">
@@ -607,7 +587,7 @@ export const Settings: React.FC = () => {
                         value={deleteInput}
                         onChange={(e) => setDeleteInput(e.target.value)}
                         placeholder="粘贴确认令牌"
-                        className="flex-1 min-w-48 text-sm border border-gray-300 dark:border-gray-700 rounded px-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder-gray-400"
+                        className="flex-1 min-w-48 text-sm border border-line-strong rounded px-3 py-2 bg-surface text-ink placeholder-gray-400"
                       />
                       <button
                         onClick={() => void onConfirmDeletion()}
@@ -622,7 +602,7 @@ export const Settings: React.FC = () => {
                           setDeleteInput("");
                           setDeleteError("");
                         }}
-                        className="text-sm bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded"
+                        className="text-sm bg-subtle px-3 py-2 rounded"
                       >
                         取消
                       </button>
@@ -640,7 +620,7 @@ export const Settings: React.FC = () => {
 
           {tab === "account" && (
             <Section
-              icon={<LogOut className="h-4 w-4 text-gray-500" />}
+              icon={<LogOut className="h-4 w-4 text-muted" />}
               title="退出登录"
             >
               <button

@@ -36,14 +36,12 @@ export const SyncDrawer: React.FC = () => {
         onClick={close}
         aria-hidden="true"
       />
-      <aside className="relative w-full max-w-md h-full bg-white dark:bg-gray-900 shadow-xl flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-            同步状态
-          </h2>
+      <aside className="relative w-full max-w-md h-full bg-surface shadow-xl flex flex-col">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-line-strong">
+          <h2 className="text-base font-semibold text-ink">同步状态</h2>
           <button
             onClick={close}
-            className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+            className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded hover:bg-subtle"
             aria-label="关闭"
           >
             <X className="h-4 w-4" />
@@ -51,7 +49,7 @@ export const SyncDrawer: React.FC = () => {
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
           <PendingMutations />
-          <div className="border-t border-gray-200 dark:border-gray-700" />
+          <div className="border-t border-line-strong" />
           <ConflictPanel />
         </div>
       </aside>

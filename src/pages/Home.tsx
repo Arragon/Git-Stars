@@ -104,13 +104,13 @@ export const Home: React.FC = () => {
           <span className="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-gray-900 shadow-card mx-auto">
             <Star className="h-9 w-9 text-brand-400" fill="currentColor" />
           </span>
-          <h1 className="text-4xl tracking-tight font-bold text-gray-900 dark:text-gray-50 sm:text-5xl">
+          <h1 className="text-4xl tracking-tight font-bold text-ink sm:text-5xl">
             <span className="block">收藏、整理并离线浏览</span>
             <span className="block mt-1">
               你的 <span className="text-brand-500">GitHub Stars</span>
             </span>
           </h1>
-          <p className="max-w-2xl mx-auto text-base text-gray-500 dark:text-gray-400 sm:text-lg">
+          <p className="max-w-2xl mx-auto text-base text-muted sm:text-lg">
             把散落的 Star 变成结构化的收藏库：AI
             自动提炼摘要与标签、列表化组织、跨设备离线同步，还能把精选分享给任何人。
           </p>
@@ -150,7 +150,7 @@ export const Home: React.FC = () => {
             <button
               onClick={handleDevLogin}
               disabled={isLoggingIn || isDevLoggingIn}
-              className={`w-full sm:w-auto inline-flex items-center justify-center px-6 py-3 border border-gray-300 dark:border-gray-700 text-base font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 ${
+              className={`w-full sm:w-auto inline-flex items-center justify-center px-6 py-3 border border-line-strong text-base font-medium rounded-md text-ink bg-surface hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 ${
                 isLoggingIn || isDevLoggingIn ? "cursor-not-allowed" : ""
               }`}
               title="本地开发登录（无需 OAuth）"
@@ -174,15 +174,15 @@ export const Home: React.FC = () => {
           {features.map((feature) => (
             <div
               key={feature.title}
-              className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 shadow-card p-5 hover:shadow-card-hover transition-shadow"
+              className="bg-surface rounded-lg border border-line shadow-card p-5 hover:shadow-card-hover transition-shadow"
             >
-              <div className="inline-flex items-center justify-center h-9 w-9 rounded-md bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
+              <div className="inline-flex items-center justify-center h-9 w-9 rounded-md bg-subtle border border-line-strong">
                 {feature.icon}
               </div>
-              <h3 className="mt-4 text-base font-semibold text-gray-900 dark:text-gray-100 tracking-tight">
+              <h3 className="mt-4 text-base font-semibold text-ink tracking-tight">
                 {feature.title}
               </h3>
-              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+              <p className="mt-2 text-sm text-muted leading-relaxed">
                 {feature.description}
               </p>
             </div>

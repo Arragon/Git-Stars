@@ -234,12 +234,10 @@ export const RepositoryView: React.FC = () => {
     if (error) {
       return (
         <div className="max-w-4xl mx-auto p-4 sm:p-6">
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-8 text-center space-y-3">
+          <div className="bg-surface rounded-lg border border-line p-8 text-center space-y-3">
             <AlertCircle className="h-10 w-10 text-red-400 mx-auto" />
-            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-              无法加载仓库
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">{error}</p>
+            <h2 className="text-base font-semibold text-ink">无法加载仓库</h2>
+            <p className="text-sm text-muted">{error}</p>
             <Button
               onClick={() => {
                 setError("");
@@ -252,11 +250,7 @@ export const RepositoryView: React.FC = () => {
         </div>
       );
     }
-    return (
-      <div className="max-w-4xl mx-auto p-6 text-gray-500 dark:text-gray-400">
-        加载中...
-      </div>
-    );
+    return <div className="max-w-4xl mx-auto p-6 text-muted">加载中...</div>;
   }
 
   const caps = repo.capabilities;
@@ -265,10 +259,10 @@ export const RepositoryView: React.FC = () => {
     : repo.name;
 
   return (
-    <div className="max-w-[1240px] mx-auto p-4 sm:p-6 space-y-4 text-gray-900 dark:text-gray-100">
+    <div className="max-w-[1240px] mx-auto p-4 sm:p-6 space-y-4 text-ink">
       <Link
         to="/library"
-        className="inline-flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+        className="inline-flex items-center gap-1 text-sm text-muted hover:text-gray-800 dark:hover:text-gray-200"
       >
         <ArrowLeft className="h-4 w-4" /> Library
       </Link>
@@ -276,11 +270,11 @@ export const RepositoryView: React.FC = () => {
       {error && <Notice tone="error">{error}</Notice>}
       {notice && <Notice tone="info">{notice}</Notice>}
 
-      <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
+      <div className="bg-surface rounded-lg border border-line p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-xl font-bold truncate">{fullName}</h1>
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-3">
+            <div className="text-xs text-muted mt-1 flex items-center gap-3">
               <span className="uppercase">{repo.providerType}</span>
               <span className="inline-flex items-center gap-1">
                 <Star className="h-3 w-3" />
@@ -296,9 +290,7 @@ export const RepositoryView: React.FC = () => {
               )}
             </div>
             {repo.description && (
-              <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">
-                {repo.description}
-              </p>
+              <p className="text-sm text-muted mt-2">{repo.description}</p>
             )}
             <a
               href={repo.webUrl}
@@ -389,17 +381,17 @@ export const RepositoryView: React.FC = () => {
             )}
           </div>
 
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4 min-h-[12rem]">
+          <div className="bg-surface rounded-lg border border-line p-4 min-h-[12rem]">
             {tab === "readme" &&
               (readme ? (
                 <div
-                  className="text-sm text-gray-800 dark:text-gray-200"
+                  className="text-sm text-ink"
                   dangerouslySetInnerHTML={{
                     __html: renderMarkdownSafe(readme),
                   }}
                 />
               ) : (
-                <div className="text-sm text-gray-500 dark:text-gray-400">
+                <div className="text-sm text-muted">
                   {caps?.readme
                     ? "Loading README..."
                     : "README not available for this provider."}
@@ -416,7 +408,7 @@ export const RepositoryView: React.FC = () => {
                     >
                       <ArrowLeft className="h-3 w-3" /> Back to files
                     </button>
-                    <pre className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-3 overflow-auto text-xs whitespace-pre-wrap text-gray-800 dark:text-gray-200">
+                    <pre className="bg-subtle border border-line-strong rounded p-3 overflow-auto text-xs whitespace-pre-wrap text-ink">
                       {file.content}
                     </pre>
                   </div>
@@ -469,7 +461,7 @@ export const RepositoryView: React.FC = () => {
                             </button>
                           )}
                           {typeof e.size === "number" && (
-                            <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">
+                            <span className="ml-auto text-xs text-muted">
                               {e.size} B
                             </span>
                           )}
@@ -478,7 +470,7 @@ export const RepositoryView: React.FC = () => {
                     </ul>
                   </div>
                 ) : (
-                  <div className="text-gray-500 dark:text-gray-400">
+                  <div className="text-muted">
                     {caps?.tree
                       ? "Loading files..."
                       : "File browsing not available for this provider."}
@@ -490,18 +482,15 @@ export const RepositoryView: React.FC = () => {
             {tab === "releases" && (
               <div className="text-sm space-y-3">
                 {releases?.map((rel) => (
-                  <div
-                    key={rel.id}
-                    className="border border-gray-100 dark:border-gray-800 rounded p-3"
-                  >
+                  <div key={rel.id} className="border border-line rounded p-3">
                     <div className="font-medium">
                       {rel.name || rel.tagName}{" "}
-                      <span className="text-gray-400 dark:text-gray-500 font-normal">
+                      <span className="text-muted font-normal">
                         {rel.tagName}
                       </span>
                     </div>
                     {rel.publishedAt && (
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                      <div className="text-xs text-muted">
                         {new Date(rel.publishedAt).toLocaleDateString()}
                       </div>
                     )}
@@ -511,9 +500,9 @@ export const RepositoryView: React.FC = () => {
                           key={a.id}
                           className="flex items-center justify-between gap-2"
                         >
-                          <span className="text-gray-700 dark:text-gray-300">
+                          <span className="text-ink">
                             {a.name}{" "}
-                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                            <span className="text-xs text-muted">
                               ({Math.max(1, Math.round(a.size / 1024))} KB)
                             </span>
                           </span>
@@ -526,20 +515,16 @@ export const RepositoryView: React.FC = () => {
                         </li>
                       ))}
                       {rel.assets.length === 0 && (
-                        <li className="text-xs text-gray-400 dark:text-gray-500">
-                          No assets
-                        </li>
+                        <li className="text-xs text-muted">No assets</li>
                       )}
                     </ul>
                   </div>
                 ))}
                 {releases && releases.length === 0 && (
-                  <div className="text-gray-500 dark:text-gray-400">
-                    No releases.
-                  </div>
+                  <div className="text-muted">No releases.</div>
                 )}
                 {!releases && (
-                  <div className="text-gray-500 dark:text-gray-400">
+                  <div className="text-muted">
                     {caps?.releases
                       ? "Loading releases..."
                       : "Releases not available for this provider."}
@@ -756,7 +741,7 @@ const TabButton: React.FC<{
 }> = ({ active, onClick, icon, label }) => (
   <button
     onClick={onClick}
-    className={`inline-flex items-center gap-1 px-3 py-2 border-b-2 -mb-px ${active ? "border-gray-900 dark:border-gray-100 font-medium" : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"}`}
+    className={`inline-flex items-center gap-1 px-3 py-2 border-b-2 -mb-px ${active ? "border-brand text-ink font-semibold" : "border-transparent text-muted hover:text-ink"}`}
   >
     {icon} {label}
   </button>
