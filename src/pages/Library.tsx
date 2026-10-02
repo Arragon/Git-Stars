@@ -131,7 +131,16 @@ export const Library: React.FC = () => {
   const [allItems, setAllItems] = useState<SavedRepository[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [filters, setFilters] = useState<LibraryFilters>(EMPTY_LIBRARY_FILTERS);
-  const [view, setView] = useState<"grid" | "list">("grid");
+  // Honor the 默认浏览方式 preference saved in Settings (localStorage).
+  const [view, setView] = useState<"grid" | "list">(() => {
+    try {
+      return localStorage.getItem("gitstars-default-view") === "list"
+        ? "list"
+        : "grid";
+    } catch {
+      return "grid";
+    }
+  });
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
