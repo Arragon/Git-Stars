@@ -13,11 +13,20 @@ import {
   X,
 } from "lucide-react";
 import { autoCollectForList } from "../utils/autoCollect";
-import { Button, Notice, PageHeader } from "../components/ui";
+import {
+  Badge,
+  Button,
+  Dialog,
+  Input,
+  Notice,
+  PageHeader,
+  Textarea,
+} from "../components/ui";
 import {
   exportList,
   getPublication,
   getList,
+  updateList,
   importCommit,
   importPreview,
   listLibrary,
@@ -41,7 +50,6 @@ import {
   readListDetailCache,
   readListsCache,
   removeListItemOffline,
-  renameList,
   upsertLibraryPage,
   upsertListDetail,
   upsertListSummaries,
@@ -196,16 +204,6 @@ export const Lists: React.FC = () => {
     }
   };
 
-  const onRename = async (list: ListSummary) => {
-    const next = window.prompt("重命名列表", list.name)?.trim();
-    if (!next || next === list.name) return;
-    await runMutate(() =>
-      renameList({ id: list.id, version: list.version }, next),
-    );
-    await reloadLists();
-    if (selected?.id === list.id) await hydrateSelectedFromCache(list.id);
-  };
-
   const onDelete = async (list: ListSummary) => {
     if (
       !window.confirm(
@@ -276,15 +274,6 @@ export const Lists: React.FC = () => {
     }
   };
 
-  const move = (index: number, dir: -1 | 1) => {
-    if (!selected) return;
-    const order = selected.items.map((i) => i.savedRepositoryId);
-    const target = index + dir;
-    if (target < 0 || target >= order.length) return;
-    [order[index], order[target]] = [order[target], order[index]];
-    void mutateItems({ reorder: order });
-  };
-
   const onExport = async (list: ListSummary) => {
     try {
       const doc = await exportList(list.id);
@@ -329,6 +318,13 @@ export const Lists: React.FC = () => {
 
   // --- 智能归类（Auto Collect）：按列表描述匹配 AI 摘要/标签自动加入 ---
   const [autoCollectBusy, setAutoCollectBusy] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<{
+    id: string;
+    name: string;
+    description: string;
+    version: number;
+  } | null>(null);
   const runAutoCollect = async () => {
     if (!selected || autoCollectBusy) return;
     if (!selected.description.trim()) {
@@ -354,6 +350,32 @@ export const Lists: React.FC = () => {
       await mutateItems({ add: matches.map((m) => m.item.id) });
     } finally {
       setAutoCollectBusy(false);
+    }
+  };
+
+  const onEditSave = async () => {
+    if (!editTarget) return;
+    const name = editTarget.name.trim();
+    if (!name) {
+      setError("列表名称不能为空");
+      return;
+    }
+    if (isOffline()) {
+      setError("离线状态暂不支持编辑列表，请联网后重试");
+      return;
+    }
+    try {
+      const updated = await updateList(editTarget, {
+        name,
+        description: editTarget.description,
+      });
+      setEditTarget(null);
+      await reloadLists();
+      if (selected?.id === updated.id) {
+        setSelected(await getList(updated.id));
+      }
+    } catch (e) {
+      setError(msg(e));
     }
   };
 
@@ -447,390 +469,479 @@ export const Lists: React.FC = () => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6 text-gray-900 dark:text-gray-100">
+    <div className="space-y-4">
       <PageHeader
         title="Lists"
         description="用列表组织收藏，支持导出、导入与公开分享"
-      />
+      >
+        <Button onClick={() => setImportOpen(true)}>
+          <Upload className="h-4 w-4" /> 导入列表
+        </Button>
+      </PageHeader>
       {error && <Notice tone="error">{error}</Notice>}
       {notice && <Notice tone="info">{notice}</Notice>}
 
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            <input
+      <div className="grid grid-cols-1 min-[721px]:grid-cols-[205px_minmax(0,1fr)] min-[901px]:grid-cols-[242px_minmax(0,1fr)] bg-surface border border-line rounded-xl overflow-hidden min-h-[630px]">
+        {/* master: list directory */}
+        <div className="border-b min-[721px]:border-b-0 min-[721px]:border-r border-line p-3 bg-canvas">
+          <div className="flex gap-1.5 mb-2">
+            <Input
               ref={nameInputRef}
-              className="flex-1 text-sm border border-gray-200 dark:border-gray-700 rounded px-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder-gray-400"
-              placeholder="New list name"
+              placeholder="新列表名称"
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") void onCreate();
               }}
             />
-            <Button onClick={() => void onCreate()}>
-              <Plus className="h-4 w-4" /> Create
+            <Button
+              size="icon"
+              aria-label="新建列表"
+              onClick={() => void onCreate()}
+            >
+              <Plus className="h-4 w-4" />
             </Button>
           </div>
           {loadingLists && lists.length === 0 ? (
-            <ul className="space-y-2" aria-hidden="true">
+            <div className="grid gap-2 px-1" aria-hidden="true">
               {[0, 1, 2].map((i) => (
-                <li
+                <div
                   key={i}
-                  className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-3 animate-pulse"
+                  className="rounded-lg border border-line p-3 animate-pulse"
                 >
-                  <div className="h-4 w-1/3 bg-gray-200 dark:bg-gray-700 rounded mb-2" />
-                  <div className="h-3 w-1/4 bg-gray-100 dark:bg-gray-800 rounded" />
-                </li>
+                  <div className="h-3.5 w-1/2 bg-subtle rounded mb-2" />
+                  <div className="h-3 w-1/3 bg-subtle rounded" />
+                </div>
               ))}
-            </ul>
+            </div>
           ) : (
-            <ul className="space-y-2">
-              {lists.map((l) => (
-                <li
-                  key={l.id}
-                  className={`bg-white dark:bg-gray-900 rounded-lg border p-3 flex items-center gap-2 ${selected?.id === l.id ? "border-gray-900 dark:border-gray-100" : "border-gray-200 dark:border-gray-800"}`}
-                >
-                  <button
-                    onClick={() => void openList(l.id)}
-                    className="flex-1 text-left min-w-0"
+            <div className="grid gap-1">
+              {lists.map((l) => {
+                const active = selected?.id === l.id;
+                return (
+                  <div
+                    key={l.id}
+                    className={`group flex items-center gap-2.5 px-2.5 py-3 rounded-lg transition-colors ${
+                      active ? "bg-brand-soft" : "hover:bg-subtle"
+                    }`}
                   >
-                    <div className="text-sm font-medium truncate">{l.name}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
-                      {l.itemCount ?? 0} items
+                    <button
+                      onClick={() => void openList(l.id)}
+                      className="flex-1 text-left min-w-0"
+                    >
+                      <div
+                        className={`text-[13px] break-all ${active ? "text-brand-text font-semibold" : ""}`}
+                      >
+                        {l.name}
+                      </div>
+                      <div className="text-[10px] text-muted mt-1">
+                        {l.itemCount ?? 0} 个仓库
+                      </div>
+                    </button>
+                    <div className="hidden group-hover:flex items-center gap-0.5">
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        aria-label="编辑"
+                        title="编辑名称与描述"
+                        onClick={() =>
+                          setEditTarget({
+                            id: l.id,
+                            name: l.name,
+                            description:
+                              lists.find((x) => x.id === l.id)?.description ??
+                              "",
+                            version: l.version,
+                          })
+                        }
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        aria-label="分享"
+                        title="分享"
+                        onClick={() => void openShare(l)}
+                      >
+                        <Share2 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        aria-label="导出"
+                        title="导出"
+                        onClick={() => onExport(l)}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        aria-label="删除"
+                        title="删除"
+                        onClick={() => void onDelete(l)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-danger" />
+                      </Button>
                     </div>
-                  </button>
-                  <button
-                    onClick={() => void onRename(l)}
-                    className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center shrink-0"
-                    title="重命名"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => void openShare(l)}
-                    className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center shrink-0"
-                    title="分享"
-                  >
-                    <Share2 className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => onExport(l)}
-                    className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center shrink-0"
-                    title="Export"
-                  >
-                    <Download className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => void onDelete(l)}
-                    className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 h-10 w-10 inline-flex items-center justify-center shrink-0"
-                    title="Delete"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </li>
-              ))}
+                  </div>
+                );
+              })}
               {lists.length === 0 && !loadingLists && (
-                <li className="text-sm text-gray-500 dark:text-gray-400 py-6 text-center">
-                  还没有列表。
-                  <button
-                    onClick={() => void onCreate()}
-                    className="ml-1 text-blue-600 dark:text-blue-400 hover:underline"
-                  >
-                    新建列表
-                  </button>
-                </li>
+                <div className="px-2 py-4 text-xs text-muted">
+                  还没有列表。在上方输入名称创建第一个。
+                </div>
               )}
-            </ul>
+            </div>
           )}
-
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-3 space-y-2">
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-200 inline-flex items-center gap-1">
-              <Upload className="h-4 w-4" /> Import a List
-            </div>
-            <textarea
-              className="w-full text-xs border border-gray-200 dark:border-gray-700 rounded p-2 font-mono bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder-gray-400"
-              rows={4}
-              placeholder="Paste a .gitstars-list JSON..."
-              value={importText}
-              onChange={(e) => setImportText(e.target.value)}
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={onPreview}
-                className="text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 px-3 py-1.5 rounded"
-              >
-                Preview
-              </button>
-              {preview && (
-                <Button size="sm" onClick={onCommit}>
-                  Confirm import
-                </Button>
-              )}
-            </div>
-            {preview && (
-              <div className="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded p-2">
-                <div className="font-medium">
-                  “{preview.title}” — {preview.summary.total} items
-                </div>
-                <div>
-                  new: {preview.summary.new} · existing:{" "}
-                  {preview.summary.existing} · unresolved:{" "}
-                  {preview.summary.unresolved}
-                </div>
-              </div>
-            )}
-          </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
+        {/* detail */}
+        <div className="p-6 min-w-0">
           {selected ? (
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">{selected.name}</h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="text-[23px] font-[650] tracking-[-0.018em] break-all">
+                    {selected.name}
+                  </h2>
+                  {selected.description ? (
+                    <p className="text-xs text-muted mt-1.5 max-w-[660px] leading-[1.8]">
+                      {selected.description}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted mt-1.5">
+                      尚无描述 — 编辑列表补充描述后可启用智能归类。
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    variant="ai"
+                    size="sm"
                     onClick={() => void runAutoCollect()}
                     disabled={autoCollectBusy}
                     title="依据列表描述与 AI 摘要/标签，把收藏库中的匹配仓库自动加入此列表"
-                    className="inline-flex items-center gap-1 text-xs bg-purple-600 text-white px-2.5 py-1.5 rounded hover:bg-purple-700 disabled:opacity-50"
                   >
                     <Sparkles
                       className={`h-3.5 w-3.5 ${autoCollectBusy ? "animate-pulse" : ""}`}
                     />
                     {autoCollectBusy ? "归类中..." : "智能归类"}
-                  </button>
-                  <button
-                    onClick={() => setSelected(null)}
-                    className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center"
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     aria-label="关闭"
+                    onClick={() => setSelected(null)}
                   >
                     <X className="h-4 w-4" />
-                  </button>
+                  </Button>
                 </div>
               </div>
               <ul className="space-y-1">
                 {selected.items.map((item, index) => (
                   <li
                     key={item.id}
-                    className="flex items-center gap-1 border border-gray-100 dark:border-gray-800 rounded px-2 py-1"
+                    className="flex items-center gap-3 py-3.5 border-b border-line last:border-b-0"
                   >
-                    <span className="text-xs text-gray-400 dark:text-gray-500 w-4">
+                    <span className="text-[10px] text-muted w-[17px] shrink-0">
                       {index + 1}
                     </span>
-                    <Link
-                      to={`/repository/${item.repository.id}`}
-                      className="flex-1 text-sm hover:underline truncate min-w-0 py-2"
-                    >
-                      {item.repository.name}
-                    </Link>
-                    <button
-                      onClick={() => move(index, -1)}
-                      className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center shrink-0 disabled:opacity-30"
-                      aria-label="Move up"
-                      disabled={index === 0}
-                    >
-                      <ArrowUp className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => move(index, 1)}
-                      className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-10 w-10 inline-flex items-center justify-center shrink-0 disabled:opacity-30"
-                      aria-label="Move down"
-                      disabled={index === selected.items.length - 1}
-                    >
-                      <ArrowDown className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() =>
-                        mutateItems({ remove: [item.savedRepositoryId] })
-                      }
-                      className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 h-10 w-10 inline-flex items-center justify-center shrink-0"
-                      aria-label="Remove from list"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        to={`/repository/${item.repository.id}`}
+                        className="text-[13px] font-[650] hover:text-brand-text block truncate"
+                      >
+                        {item.repository.name}
+                      </Link>
+                      <p className="text-[11px] text-muted truncate">
+                        {item.repository.namespacePath ?? ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        aria-label="上移"
+                        disabled={index === 0 || isOffline()}
+                        onClick={() => {
+                          const order = selected.items.map(
+                            (i) => i.savedRepositoryId,
+                          );
+                          [order[index - 1], order[index]] = [
+                            order[index],
+                            order[index - 1],
+                          ];
+                          void mutateItems({ reorder: order });
+                        }}
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        aria-label="下移"
+                        disabled={
+                          index === selected.items.length - 1 || isOffline()
+                        }
+                        onClick={() => {
+                          const order = selected.items.map(
+                            (i) => i.savedRepositoryId,
+                          );
+                          [order[index], order[index + 1]] = [
+                            order[index + 1],
+                            order[index],
+                          ];
+                          void mutateItems({ reorder: order });
+                        }}
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        aria-label="移出列表"
+                        onClick={() =>
+                          void mutateItems({ remove: [item.savedRepositoryId] })
+                        }
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </li>
                 ))}
                 {selected.items.length === 0 && (
-                  <li className="text-sm text-gray-500 dark:text-gray-400">
-                    Empty list.
+                  <li className="text-sm text-muted py-6 text-center">
+                    空列表 — 从上方「智能归类」或 Library 卡片加入仓库。
                   </li>
                 )}
               </ul>
-              <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
-                <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                  Add from library
-                </div>
-                <select
-                  className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100"
-                  defaultValue=""
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v) {
-                      void mutateItems({ add: [v] });
-                      e.target.value = "";
-                    }
-                  }}
-                >
-                  <option value="" disabled>
-                    Select a saved repository...
-                  </option>
-                  {addable.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.repository.namespacePath
-                        ? `${s.repository.namespacePath}/`
-                        : ""}
-                      {s.repository.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
             </div>
           ) : (
-            <div className="text-sm text-gray-500 dark:text-gray-400 py-12 text-center">
-              Select a list to view and edit its items.
+            <div className="h-full grid place-items-center py-20 text-sm text-muted">
+              从左侧选择一个列表查看内容
             </div>
           )}
         </div>
       </div>
 
-      {shareTarget && (
-        <div
-          className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-4"
-          onClick={closeShare}
-        >
-          <div
-            className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 w-full max-w-md p-4 space-y-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold">
-                分享「{shareTarget.name}」
-              </h3>
-              <button
-                onClick={closeShare}
-                className="text-gray-400 hover:text-gray-700"
-                aria-label="关闭"
-              >
-                <X className="h-4 w-4" />
-              </button>
+      {/* Import dialog */}
+      <Dialog
+        open={importOpen}
+        onClose={() => {
+          setImportOpen(false);
+          setPreview(null);
+        }}
+        title="导入列表"
+        footer={
+          <>
+            {preview && (
+              <Button size="sm" onClick={onCommit}>
+                确认导入
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              onClick={onPreview}
+              disabled={!importText.trim()}
+            >
+              预览
+            </Button>
+          </>
+        }
+      >
+        <p className="text-xs text-muted mb-4">
+          粘贴 gitstars-list v0 格式的
+          JSON。预览通过后才会创建；未知平台的条目会保留为未解析记录。
+        </p>
+        <Textarea
+          rows={6}
+          className="font-mono text-xs"
+          placeholder='{"format":"gitstars-list","schemaVersion":0,...}'
+          value={importText}
+          onChange={(e) => setImportText(e.target.value)}
+        />
+        {preview && (
+          <div className="bg-canvas border border-line rounded-lg p-3.5 text-xs mt-4 leading-[1.8]">
+            <div className="font-medium">
+              “{preview.title}” — 共 {preview.summary.total} 项
             </div>
+            <div className="text-muted">
+              新增 {preview.summary.new} · 已存在 {preview.summary.existing} ·
+              未解析 {preview.summary.unresolved}
+            </div>
+          </div>
+        )}
+      </Dialog>
 
-            {shareError && (
-              <div className="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded px-3 py-2">
-                {shareError}
-              </div>
-            )}
-            {shareNotice && (
-              <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
-                {shareNotice}
-              </div>
-            )}
-
-            {shareLoading ? (
-              <div className="text-sm text-gray-500 py-4 text-center">
-                加载中...
-              </div>
-            ) : publication ? (
-              <div className="space-y-3">
-                <div className="text-xs text-gray-500">
-                  状态：
-                  {publication.status === "active"
-                    ? "公开分享中"
-                    : publication.status === "revoked"
-                      ? "已取消分享"
-                      : "已下架"}
-                  {" · "}快照 v{publication.snapshotVersion} ·{" "}
-                  {publication.repositoryCount} 个仓库
-                </div>
-                {publication.status === "active" && (
-                  <div className="flex gap-2">
-                    <input
-                      readOnly
-                      value={`${window.location.origin}${publication.shareUrl}`}
-                      className="flex-1 text-xs border border-gray-200 rounded px-2 py-1.5 bg-gray-50 text-gray-600"
-                    />
-                    <button
-                      onClick={copyShareLink}
-                      className="text-sm bg-gray-900 text-white px-3 py-1.5 rounded whitespace-nowrap"
-                    >
-                      {copied ? "已复制" : "复制"}
-                    </button>
-                  </div>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={onPublish}
-                    disabled={shareBusy}
-                    className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded disabled:opacity-60"
-                  >
-                    更新快照
-                  </button>
-                  <button
-                    onClick={() => void onHubToggle(!publication.hubOptIn)}
-                    disabled={shareBusy || publication.status !== "active"}
-                    className={`text-sm px-3 py-1.5 rounded border disabled:opacity-60 ${
-                      publication.hubOptIn
-                        ? "bg-gray-900 text-white border-gray-900"
-                        : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-                    }`}
-                    title={
-                      publication.status !== "active"
-                        ? "需要公开分享中的发布"
-                        : undefined
-                    }
-                  >
-                    Hub 公开：{publication.hubOptIn ? "开" : "关"}
-                  </button>
-                  {publication.status !== "takedown" &&
-                    (confirmRevoke ? (
-                      <>
-                        <button
-                          onClick={onRevoke}
-                          disabled={shareBusy}
-                          className="text-sm bg-red-600 text-white px-3 py-1.5 rounded disabled:opacity-60"
-                        >
-                          确认取消分享
-                        </button>
-                        <button
-                          onClick={() => setConfirmRevoke(false)}
-                          className="text-sm bg-gray-100 px-3 py-1.5 rounded"
-                        >
-                          保留
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        onClick={() => setConfirmRevoke(true)}
-                        disabled={shareBusy}
-                        className="text-sm text-red-600 border border-red-200 hover:bg-red-50 px-3 py-1.5 rounded disabled:opacity-60"
-                      >
-                        取消分享
-                      </button>
-                    ))}
-                </div>
-                <p className="text-xs text-gray-400">
-                  任何人都可以通过分享链接查看此列表的公开快照（不含私有仓库、备注与标签）。
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="text-xs text-gray-500">
-                  尚未发布。发布后会生成一个公开分享链接，快照仅包含公开仓库的基本信息。
-                </div>
-                <button
-                  onClick={onPublish}
+      {/* Share (publication) dialog */}
+      <Dialog
+        open={shareTarget !== null}
+        onClose={closeShare}
+        title={shareTarget ? `分享 · ${shareTarget.name}` : "分享"}
+        footer={
+          publication ? (
+            <>
+              {publication.hubOptIn ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={shareBusy}
-                  className="text-sm bg-gray-900 text-white px-3 py-1.5 rounded disabled:opacity-60"
+                  onClick={() => void onHubToggle(false)}
                 >
-                  {shareBusy ? "发布中..." : "发布分享链接"}
-                </button>
+                  从 Hub 移除
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={shareBusy}
+                  onClick={() => void onHubToggle(true)}
+                >
+                  公开到 Hub
+                </Button>
+              )}
+              {publication.status === "active" ? (
+                <Button
+                  variant="danger"
+                  size="sm"
+                  disabled={shareBusy}
+                  onClick={() => setConfirmRevoke(true)}
+                >
+                  取消分享
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  disabled={shareBusy}
+                  onClick={() => void onPublish()}
+                >
+                  重新发布
+                </Button>
+              )}
+            </>
+          ) : (
+            <Button
+              variant="ai"
+              disabled={shareLoading || shareBusy}
+              onClick={() => void onPublish()}
+            >
+              {shareLoading ? "生成中…" : "生成分享链接"}
+            </Button>
+          )
+        }
+      >
+        {shareError && <Notice tone="error">{shareError}</Notice>}
+        {shareNotice && <Notice tone="success">{shareNotice}</Notice>}
+        {shareLoading && !publication ? (
+          <p className="text-xs text-muted">正在读取分享状态…</p>
+        ) : publication ? (
+          <div className="grid gap-4">
+            <div>
+              <div className="text-xs font-semibold mb-1.5">公开范围</div>
+              <p className="text-xs text-muted leading-[1.8]">
+                分享是当前内容的独立快照：包含列表名称、描述与公开仓库的名称和地址。个人备注、手动标签、AI
+                摘要/标签与私有仓库不会包含。修改列表后需在此手动更新快照，公开页才会变化。
+              </p>
+            </div>
+            <div className="bg-canvas border border-line rounded-lg p-3.5 text-xs break-all">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <span className="font-semibold">分享链接</span>
+                <span className="text-muted">
+                  快照 v{publication.snapshotVersion}
+                </span>
+              </div>
+              <code className="text-info">
+                {window.location.origin}
+                {publication.shareUrl}
+              </code>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => void copyShareLink()}>
+                {copied ? "已复制" : "复制链接"}
+              </Button>
+              <a
+                href={publication.shareUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-info hover:underline"
+              >
+                打开公开页
+              </a>
+              <Badge tone={publication.hubOptIn ? "success" : "neutral"}>
+                {publication.hubOptIn ? "已加入 Hub" : "未加入 Hub"}
+              </Badge>
+            </div>
+            {confirmRevoke && (
+              <div className="bg-danger-soft text-danger border border-line rounded-lg p-3 text-xs">
+                取消分享后，公开链接将立即失效，Hub
+                展示同步移除；你的私有列表不受影响。确定取消？
+                <div className="flex gap-2 mt-2">
+                  <Button size="xs" onClick={() => setConfirmRevoke(false)}>
+                    先不取消
+                  </Button>
+                  <Button
+                    variant="danger-solid"
+                    size="xs"
+                    disabled={shareBusy}
+                    onClick={() => void onRevoke()}
+                  >
+                    确认取消分享
+                  </Button>
+                </div>
               </div>
             )}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-muted leading-[1.8]">
+            生成分享链接会创建当前列表的公开快照：包含列表名称、描述与公开仓库的名称和地址；个人备注、标签与私有仓库不会包含。生成后可选择是否公开到
+            Hub 广场。
+          </p>
+        )}
+      </Dialog>
+
+      {/* Edit list dialog */}
+      <Dialog
+        open={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        title="编辑列表"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEditTarget(null)}>
+              取消
+            </Button>
+            <Button onClick={() => void onEditSave()}>保存</Button>
+          </>
+        }
+      >
+        {editTarget && (
+          <div className="grid gap-4">
+            <label className="flex flex-col gap-1.5 text-xs font-semibold">
+              名称
+              <Input
+                value={editTarget.name}
+                onChange={(e) =>
+                  setEditTarget({ ...editTarget, name: e.target.value })
+                }
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-xs font-semibold">
+              描述
+              <span className="font-normal text-muted">
+                描述用于智能归类匹配，写得越具体效果越好。
+              </span>
+              <Textarea
+                className="min-h-[80px]"
+                value={editTarget.description}
+                onChange={(e) =>
+                  setEditTarget({ ...editTarget, description: e.target.value })
+                }
+              />
+            </label>
+          </div>
+        )}
+      </Dialog>
     </div>
   );
 };

@@ -81,14 +81,15 @@ export interface ListSummary {
 export interface ListItemView {
   id: string;
   savedRepositoryId: string;
-  position: number;
-  note?: string;
   repository: {
     id: string;
     providerType: string;
     name: string;
+    namespacePath?: string;
     webUrl: string;
   };
+  position: number;
+  note?: string;
 }
 
 export interface ListDetail extends ListSummary {
@@ -165,6 +166,14 @@ export const createList = (name: string, description = "") =>
     { headers: { "Idempotency-Key": idemKey() } },
   );
 export const getList = (id: string) => apiGet<ListDetail>(`/api/lists/${id}`);
+
+export const updateList = (
+  list: { id: string; version: number },
+  patch: { name: string; description: string },
+) =>
+  apiPut<ListSummary>(`/api/lists/${list.id}`, patch, {
+    headers: { "If-Match": `${list.id}:${list.version}` },
+  });
 export const deleteList = (id: string) =>
   apiDelete<{ ok: boolean }>(`/api/lists/${id}`);
 export const updateListItems = (

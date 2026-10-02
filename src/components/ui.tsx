@@ -154,10 +154,13 @@ export const Badge: React.FC<{
 
 // --- Form controls ---
 
-export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({
-  className = "",
-  ...rest
-}) => <input className={`${inputBase} ${className}`} {...rest} />;
+export const Input = React.forwardRef<
+  HTMLInputElement,
+  React.InputHTMLAttributes<HTMLInputElement>
+>(({ className = "", ...rest }, ref) => (
+  <input ref={ref} className={`${inputBase} ${className}`} {...rest} />
+));
+Input.displayName = "Input";
 
 export const Select: React.FC<
   React.SelectHTMLAttributes<HTMLSelectElement>
@@ -168,14 +171,17 @@ export const Select: React.FC<
   />
 );
 
-export const Textarea: React.FC<
+export const Textarea = React.forwardRef<
+  HTMLTextAreaElement,
   React.TextareaHTMLAttributes<HTMLTextAreaElement>
-> = ({ className = "", ...rest }) => (
+>(({ className = "", ...rest }, ref) => (
   <textarea
+    ref={ref}
     className={`${inputBase} min-h-[100px] resize-y leading-[1.7] py-2 ${className}`}
     {...rest}
   />
-);
+));
+Textarea.displayName = "Textarea";
 
 // --- Spinner ---
 
