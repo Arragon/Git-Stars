@@ -1,74 +1,120 @@
+// src/store/useAiConfigStore.ts
+// AI provider configuration, persisted in localStorage (the key is the user's
+// own, stored on their own device; see security review L1). `presetId` picks a
+// vendor preset from src/ai/providers.ts which supplies protocol flavor, base
+// URL and default model so the user only enters an API key.
+
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-
-export type AiProvider = "openai" | "google" | "claude" | "minimax" | "custom";
+import { getPreset, LEGACY_PROVIDER_TO_PRESET } from "../ai/providers";
 
 export interface AiConfig {
-  provider: AiProvider;
+  presetId: string;
   baseUrl: string;
   apiKey: string;
   model: string;
   language: string;
+  /** Model ids fetched from the vendor's list endpoint (best-effort cache). */
+  fetchedModels?: string[];
 }
 
 interface AiConfigState {
   config: AiConfig;
   setConfig: (config: Partial<AiConfig>) => void;
+  /** Switch preset: apply its baseUrl/defaultModel unless explicitly overridden. */
+  applyPreset: (presetId: string) => void;
+  setFetchedModels: (models: string[]) => void;
   isConfigured: () => boolean;
 }
 
-const defaultConfigs: Record<
-  AiProvider,
-  Omit<AiConfig, "apiKey" | "provider" | "language">
-> = {
-  openai: { baseUrl: "https://api.openai.com/v1", model: "gpt-3.5-turbo" },
-  google: {
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-    model: "gemini-pro",
-  },
-  claude: {
-    baseUrl: "https://api.anthropic.com/v1",
-    model: "claude-3-haiku-20240307",
-  },
-  minimax: { baseUrl: "https://aigc.x-see.cn/v1", model: "MiniMax-M2.5" },
-  custom: { baseUrl: "", model: "" },
-};
+const DEFAULT_PRESET_ID = "minimax";
+
+function defaultsFor(presetId: string): { baseUrl: string; model: string } {
+  const preset = getPreset(presetId);
+  return {
+    baseUrl: preset?.baseUrl ?? "",
+    model: preset?.defaultModel ?? "",
+  };
+}
 
 export const useAiConfigStore = create<AiConfigState>()(
   persist(
     (set, get) => ({
       config: {
-        provider: "minimax",
-        baseUrl: defaultConfigs.minimax.baseUrl,
+        presetId: DEFAULT_PRESET_ID,
+        ...defaultsFor(DEFAULT_PRESET_ID),
         apiKey: "",
-        model: defaultConfigs.minimax.model,
         language: "Simplified Chinese",
       },
       setConfig: (newConfig) =>
+        set((state) => ({ config: { ...state.config, ...newConfig } })),
+      applyPreset: (presetId) =>
         set((state) => {
-          const merged = { ...state.config, ...newConfig };
-          // If provider changed and baseUrl/model weren't explicitly provided, apply defaults
-          if (
-            newConfig.provider &&
-            newConfig.provider !== state.config.provider
-          ) {
-            if (!newConfig.baseUrl)
-              merged.baseUrl = defaultConfigs[newConfig.provider].baseUrl;
-            if (!newConfig.model)
-              merged.model = defaultConfigs[newConfig.provider].model;
-          }
-          return { config: merged };
+          const defaults = defaultsFor(presetId);
+          return {
+            config: {
+              ...state.config,
+              presetId,
+              baseUrl: defaults.baseUrl,
+              model: defaults.model,
+              fetchedModels: undefined,
+            },
+          };
         }),
+      setFetchedModels: (fetchedModels) =>
+        set((state) => ({ config: { ...state.config, fetchedModels } })),
       isConfigured: () => {
         const { config } = get();
-        const apiKeyOk = config.apiKey.trim().length > 0;
-        const baseUrlOk = config.baseUrl.trim().length > 0;
-        const modelOk = config.model.trim().length > 0;
-        return apiKeyOk && baseUrlOk && modelOk;
+        return (
+          config.apiKey.trim().length > 0 &&
+          config.baseUrl.trim().length > 0 &&
+          config.model.trim().length > 0
+        );
       },
     }),
     {
       name: "ai-config-storage",
+      version: 1,
+      // v0 stored {provider: "openai"|"google"|"claude"|"minimax"|"custom"}.
+      // Map legacy ids to preset ids, preserving the user's key/URL/model.
+      migrate: (persisted) => {
+        const legacy = persisted as {
+          config?: {
+            provider?: string;
+            presetId?: string;
+            baseUrl?: string;
+            apiKey?: string;
+            model?: string;
+            language?: string;
+          };
+        };
+        const old = legacy?.config;
+        if (!old) {
+          return {
+            config: {
+              presetId: DEFAULT_PRESET_ID,
+              ...defaultsFor(DEFAULT_PRESET_ID),
+              apiKey: "",
+              language: "Simplified Chinese",
+            },
+          };
+        }
+        const presetId =
+          old.presetId ??
+          LEGACY_PROVIDER_TO_PRESET[old.provider ?? ""] ??
+          DEFAULT_PRESET_ID;
+        const defaults = defaultsFor(presetId);
+        return {
+          config: {
+            presetId,
+            // A legacy "custom" provider had a user-supplied URL — keep it.
+            baseUrl: old.baseUrl?.trim() ? old.baseUrl : defaults.baseUrl,
+            apiKey: old.apiKey ?? "",
+            model: old.model?.trim() ? old.model : defaults.model,
+            language: old.language ?? "Simplified Chinese",
+          },
+        };
+      },
     },
   ),
 );

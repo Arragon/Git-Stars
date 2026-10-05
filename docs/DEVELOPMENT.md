@@ -115,15 +115,17 @@ SQLite 数据库文件默认位于 `data/gitstars.db`，可通过 `DATABASE_PATH
 
 ## CI 门禁
 
-CI 工作流（`.github/workflows/ci.yml`）依次执行：
+CI 工作流（`.github/workflows/ci.yml`）依次执行（ADR-0007 D4）：
 
 - `npm ci`
+- `npm run format:check`
 - `npm run check`
-- `npm run lint`（当前保留 `continue-on-error: true`，待清零既有 lint error 后移除）
+- `npm run lint`（阻断）
 - `npm test`
+- `npm run api:check` — 校验 `server/openapi.yaml`；PR 时与目标分支基线做 breaking-change diff
 - `npm run build`
 
-不需要 Docker 或外部数据库服务。
+唯一已记录的偏差：schema-breaking 基线对比（SQLite schema dump 对比）尚未实现，跟踪于 INH-319/INH-494。不需要 Docker 或外部数据库服务。
 
 ## 本地开发登录 vs GitHub OAuth
 

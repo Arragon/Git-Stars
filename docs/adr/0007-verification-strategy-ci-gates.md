@@ -1,6 +1,6 @@
 # ADR-0007: Verification Strategy, Fixtures and CI Quality Gates
 
-- Status: Accepted (frozen; final freeze after INH-315 per its dependency note)
+- Status: Accepted (frozen 2026-09-29; INH-315 contract schema committed at `server/openapi.yaml`, contract gate wired in CI)
 - Date: 2026-09-05
 - Linear: [INH-319](https://linear.app/inhandy/issue/INH-319/define-verification-strategy-fixtures-and-ci-quality-gates)
 - Milestone: M0 - Architecture Contracts

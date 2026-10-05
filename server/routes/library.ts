@@ -40,6 +40,7 @@ interface JoinedRow {
   stars_count: number;
   forks_count: number;
   repo_status: string;
+  membership_kinds: string | null;
 }
 
 const SELECT_JOIN = `
@@ -47,7 +48,9 @@ const SELECT_JOIN = `
          sr.version, sr.added_at, sr.updated_at, sr.deleted_at,
          r.provider_type, r.host, r.remote_id, r.canonical_key, r.namespace_path, r.name,
          r.web_url, r.description, r.visibility, r.primary_language, r.stars_count, r.forks_count,
-         r.status AS repo_status
+         r.status AS repo_status,
+         (SELECT GROUP_CONCAT(DISTINCT rm.kind) FROM remote_memberships rm
+          WHERE rm.user_id = sr.user_id AND rm.repository_id = sr.repository_id AND rm.active = 1) AS membership_kinds
   FROM saved_repositories sr JOIN repositories r ON r.id = sr.repository_id`;
 
 function parseJson<T>(raw: string | null, fallback: T): T {
@@ -95,6 +98,9 @@ function serialize(row: JoinedRow, tags: Array<{ id: string; name: string }>) {
     aiTags: parseJson<string[]>(row.ai_tags, []),
     addedAt: row.added_at,
     updatedAt: row.updated_at,
+    kinds: row.membership_kinds
+      ? row.membership_kinds.split(",").filter(Boolean)
+      : [],
     repository: {
       id: row.repository_id,
       providerType: row.provider_type,

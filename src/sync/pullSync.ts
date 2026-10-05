@@ -78,6 +78,10 @@ export function createPullSync(config: PullSyncConfig): PullSync {
     let cursor = since;
     let totalApplied = 0;
     let hasMore = true;
+    // A 410 CURSOR_INVALID means our cursor points past the server feed tail (e.g.
+    // server-side DB reset). Recovery is a full re-pull from 0; queued local mutations
+    // are never touched. Guard flag prevents an endless reset loop.
+    let didCursorReset = false;
 
     while (hasMore) {
       setStatus("pulling");
@@ -93,6 +97,15 @@ export function createPullSync(config: PullSyncConfig): PullSync {
           (err as { status?: number })?.status === 426
         ) {
           throw new StaleClientError();
+        }
+        // 410 CURSOR_INVALID — restart the pull from an empty cursor once.
+        if (
+          !didCursorReset &&
+          (err as { status?: number; code?: string })?.status === 410
+        ) {
+          didCursorReset = true;
+          cursor = 0;
+          continue;
         }
         // Network / other error — preserve cursor, stop.
         throw err;
@@ -151,8 +164,14 @@ export function createPullSync(config: PullSyncConfig): PullSync {
 function applyChange(tx: TransactionContext, change: ChangeEntry): void {
   const d = change.data ?? {};
 
+  // Non-delete changes without a payload cannot be materialized safely (the row was
+  // already hard-purged server-side, or the server predates payloads). Skip rather
+  // than write a half-empty replica row; a later full refresh repairs the gap.
+  if (!change.data && change.op !== "deleted") return;
+
   switch (change.entityType) {
     case "repository":
+      if (!change.data) return;
       tx.put<CachedRepository>("repositories", {
         id: change.entityId,
         providerType: str(d.providerType) ?? "",
@@ -176,6 +195,11 @@ function applyChange(tx: TransactionContext, change: ChangeEntry): void {
       break;
 
     case "saved_repository": {
+      if (change.op === "deleted" && !change.data) {
+        // No tombstone payload available (row purged server-side): drop the local row.
+        tx.delete("savedRepositories", change.entityId);
+        break;
+      }
       if (change.op === "deleted" || d.deletedAt) {
         // Tombstone: upsert with deletedAt marker.
         tx.put<CachedSavedRepository>("savedRepositories", {
@@ -219,10 +243,15 @@ function applyChange(tx: TransactionContext, change: ChangeEntry): void {
 
     case "repository_tag":
       if (change.op === "deleted") {
-        tx.delete(
-          "repositoryTags",
-          `${str(d.savedRepositoryId)}:${str(d.tagId)}`,
-        );
+        // Client keyPath is the composite [savedRepositoryId, tagId]; fall back to
+        // parsing the server entityId `${savedRepositoryId}:${tagId}` when the row is
+        // already gone and no payload was attached.
+        const savedId =
+          str(d.savedRepositoryId) ?? change.entityId.split(":")[0];
+        const tagId = str(d.tagId) ?? change.entityId.split(":")[1];
+        if (savedId && tagId) {
+          tx.delete("repositoryTags", [savedId, tagId]);
+        }
       } else {
         tx.put<CachedRepositoryTag>("repositoryTags", {
           tagId: str(d.tagId) ?? change.entityId,
@@ -233,6 +262,10 @@ function applyChange(tx: TransactionContext, change: ChangeEntry): void {
       break;
 
     case "list":
+      if (change.op === "deleted" && !change.data) {
+        tx.delete("lists", change.entityId);
+        break;
+      }
       if (change.op === "deleted" || d.deletedAt) {
         tx.put<CachedList>("lists", {
           id: change.entityId,
@@ -275,6 +308,7 @@ function applyChange(tx: TransactionContext, change: ChangeEntry): void {
       break;
 
     case "preference":
+      if (!change.data) return;
       tx.put<CachedPreferences>("preferences", {
         id: "singleton",
         data: (d.data as Record<string, unknown>) ?? {},

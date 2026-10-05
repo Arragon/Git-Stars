@@ -1,4 +1,5 @@
 import { ProviderError } from "../types.js";
+import { assertEgressUrl } from "../../lib/egress.js";
 
 // Shared provider transport mechanics (ADR-0002 D6): timeout/abort, bounded retry with
 // backoff+jitter, Retry-After handling, Link-header pagination, in-flight dedupe.
@@ -55,6 +56,7 @@ async function send(
   init: RequestInit,
   timeoutMs: number,
 ): Promise<Response> {
+  assertEgressUrl(url); // SSRF guard: https to public DNS hosts only.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

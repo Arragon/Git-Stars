@@ -46,6 +46,8 @@ export const env = {
   credentialKey: optional("CREDENTIAL_KEY"),
   // Dev-login is refused in production unless this is explicitly true (ADR-0005 D1).
   allowDevLogin: optionalBool("ALLOW_DEV_LOGIN", false),
+  // Admin API bearer token (M5 takedown). Empty = admin endpoints disabled (503).
+  adminToken: optional("ADMIN_TOKEN"),
 };
 
 export const isProduction = env.nodeEnv === "production";

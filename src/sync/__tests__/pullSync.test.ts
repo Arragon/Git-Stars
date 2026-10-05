@@ -14,7 +14,7 @@ function makeChange(
   entityType: string,
   entityId: string,
   op: string,
-  data: Record<string, unknown> = {},
+  data?: Record<string, unknown>,
   version = 1,
 ): ChangeEntry {
   return {
@@ -538,5 +538,92 @@ describe("pullSync", () => {
     expect(repoTags).toHaveLength(0);
     items = await store.getListItems();
     expect(items).toHaveLength(0);
+  });
+
+  // 9. Server-side cursor invalidation (410 CURSOR_INVALID) → full re-pull once;
+  // queued local mutations are untouched.
+  it("410 CURSOR_INVALID → resets cursor to 0, re-pulls, preserves mutation queue", async () => {
+    // Seed local state: a cursor at seq 7 and a pending queued mutation.
+    await store.put("syncCursor", {
+      id: "default",
+      lastSeq: 7,
+      protocolVersion: 1,
+    });
+    await store.put("mutationQueue", {
+      id: "mk-1",
+      entity: "tag",
+      operation: "create",
+      entityId: "t-new",
+      baseVersion: 0,
+      payload: { name: "queued" },
+      createdAt: "2026-01-01T00:00:00Z",
+      retryCount: 0,
+      status: "pending",
+    });
+
+    const error = Object.assign(new Error("Gone"), { status: 410 });
+    const batch = [
+      makeChange(1, "tag", "t1", "created", { name: "after-reset" }),
+    ];
+    let calls = 0;
+    const api = {
+      getChanges: vi.fn(async (since: number) => {
+        calls++;
+        if (calls === 1) {
+          expect(since).toBe(7);
+          throw error;
+        }
+        expect(since).toBe(0);
+        return feed(batch);
+      }),
+    };
+
+    const ps = createPullSync({ localStore: store, apiClient: api });
+    const result = await ps.sync();
+
+    expect(result.applied).toBe(1);
+    expect(result.cursor).toBe(1);
+    expect(calls).toBe(2);
+
+    const tags = await store.getTags();
+    expect(tags.map((t) => t.name)).toEqual(["after-reset"]);
+
+    // Pending mutation queue untouched by the re-pull.
+    const queued = await store.getAll("mutationQueue");
+    expect(queued).toHaveLength(1);
+
+    // A second consecutive 410 must surface as an error, not loop forever.
+    const apiAlways410 = {
+      getChanges: vi.fn(async () => {
+        throw Object.assign(new Error("Gone"), { status: 410 });
+      }),
+    };
+    const ps2 = createPullSync({ localStore: store, apiClient: apiAlways410 });
+    await expect(ps2.sync()).rejects.toThrow();
+  });
+
+  // 10. Non-delete change without payload is skipped, not materialized empty.
+  it("skips non-delete changes without data; delete without data removes the row", async () => {
+    await store.put("syncCursor", {
+      id: "default",
+      lastSeq: 2,
+      protocolVersion: 1,
+    });
+    const changes = [
+      makeChange(3, "list", "l1", "created", undefined), // no data → skip
+      makeChange(4, "tag", "t1", "created", { name: "keep" }),
+      makeChange(5, "tag", "t1", "deleted", undefined), // no data → delete by entityId
+    ];
+    const api = mockApiClient([feed(changes)]);
+    const ps = createPullSync({ localStore: store, apiClient: api });
+    await ps.pullIncremental();
+
+    const lists = await store.getAll("lists");
+    expect(lists).toHaveLength(0); // never materialized
+    const tags = await store.getTags();
+    expect(tags).toHaveLength(0); // created then removed
+
+    const cursor = await store.getSyncCursor();
+    expect(cursor!.lastSeq).toBe(5);
   });
 });

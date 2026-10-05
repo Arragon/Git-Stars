@@ -2,11 +2,13 @@ import React, { useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { Home } from "./pages/Home";
-import { Dashboard } from "./pages/Dashboard";
-import { ProjectDetail } from "./pages/ProjectDetail";
 import { Library } from "./pages/Library";
 import { RepositoryView } from "./pages/RepositoryView";
 import { Lists } from "./pages/Lists";
+import { Settings } from "./pages/Settings";
+import { Hub } from "./pages/Hub";
+import { PublicListPage } from "./pages/PublicListPage";
+import { NotFound } from "./pages/NotFound";
 import {
   useSyncStatusStore,
   startSyncStatusPolling,
@@ -14,18 +16,28 @@ import {
 } from "./store/useSyncStatusStore";
 import { pullSync, pushReplay } from "./sync/syncClient";
 import { localStore } from "./data";
+import { CacheRecoveryScreen } from "./components/CacheRecoveryScreen";
+import { Toasts } from "./components/Toasts";
+import { classifyCacheError } from "./utils/cacheRecovery";
 
 const SyncProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const setOnline = useSyncStatusStore((s) => s.setOnline);
+  const cacheError = useSyncStatusStore((s) => s.cacheError);
+  const setCacheError = useSyncStatusStore((s) => s.setCacheError);
 
   useEffect(() => {
-    // Initialize IndexedDB on mount
+    // Initialize IndexedDB on mount. A hard failure here (corrupt schema, cache
+    // written by a newer build) surfaces the recovery screen instead of silently
+    // degrading (INH-406).
     localStore
       .open()
       .then(() => localStore.migrate())
-      .catch(console.error);
+      .catch((err) => {
+        console.error("Local cache unavailable", err);
+        setCacheError(classifyCacheError(err));
+      });
 
     const handleOnline = () => {
       setOnline(true);
@@ -53,9 +65,19 @@ const SyncProvider: React.FC<{ children: React.ReactNode }> = ({
       window.removeEventListener("offline", handleOffline);
       stopSyncStatusPolling();
     };
-  }, [setOnline]);
+  }, [setOnline, setCacheError]);
 
-  return <>{children}</>;
+  // Hard cache failure: recovery UI instead of a degraded app (INH-406).
+  if (cacheError) {
+    return <CacheRecoveryScreen />;
+  }
+
+  return (
+    <>
+      {children}
+      <Toasts />
+    </>
+  );
 };
 
 function App() {
@@ -68,8 +90,12 @@ function App() {
             <Route path="library" element={<Library />} />
             <Route path="repository/:id" element={<RepositoryView />} />
             <Route path="lists" element={<Lists />} />
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="project/:id" element={<ProjectDetail />} />
+            <Route path="settings" element={<Settings />} />
+            {/* M5 public surfaces: render without a session (Layout exempts
+                /hub and /s/* from its anonymous redirect). */}
+            <Route path="hub" element={<Hub />} />
+            <Route path="s/:shareId" element={<PublicListPage />} />
+            <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>
       </SyncProvider>

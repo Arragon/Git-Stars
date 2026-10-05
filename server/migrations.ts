@@ -494,9 +494,71 @@ function generateKeyForIndex(i: number): string {
   return "bg" + generateBetween(null, null); // 'bgm' fallback
 }
 
+function migrationV3(db: DatabaseSync): void {
+  // M5 sharing & hub (ADR-0003: Share/PublicListSnapshot become real tables).
+  // Publications are server-managed sharing state, NOT user-state sync entities:
+  // they never enter the change feed. One publication per list (UNIQUE list_id);
+  // republishing updates in place and bumps snapshot_version. The id is a public
+  // shareId (Crockford base32 of 128 random bits) — never the internal list UUID.
+  db.exec(`
+CREATE TABLE IF NOT EXISTS list_publications (
+  id TEXT PRIMARY KEY,
+  list_id TEXT NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'active',
+  hub_opt_in INTEGER NOT NULL DEFAULT 0,
+  snapshot_version INTEGER NOT NULL DEFAULT 1,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  repository_count INTEGER NOT NULL DEFAULT 0,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(list_id)
+);
+
+CREATE TABLE IF NOT EXISTS publication_reports (
+  id TEXT PRIMARY KEY,
+  publication_id TEXT NOT NULL REFERENCES list_publications(id) ON DELETE CASCADE,
+  reason TEXT NOT NULL,
+  detail TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS audit_events (
+  id TEXT PRIMARY KEY,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  meta TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_list_publications_user ON list_publications(user_id);
+CREATE INDEX IF NOT EXISTS idx_list_publications_hub ON list_publications(hub_opt_in, status);
+CREATE INDEX IF NOT EXISTS idx_publication_reports_publication ON publication_reports(publication_id);
+CREATE INDEX IF NOT EXISTS idx_audit_events_subject ON audit_events(subject);
+`);
+}
+
+function migrationV4(db: DatabaseSync): void {
+  // Account deletion two-step state machine (INH-476): a deletion request stores
+  // only a hash of the confirmation token; execution happens in one transaction
+  // (server/services/accountDeletion.ts) and cascades remove all user-owned rows.
+  db.exec(`
+CREATE TABLE IF NOT EXISTS account_deletions (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL,
+  requested_at TEXT NOT NULL
+);
+`);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "new_domain_tables_and_backfill", up: migrationV1 },
   { version: 2, name: "list_items_position_key_fractional", up: migrationV2 },
+  { version: 3, name: "publications_hub_audit", up: migrationV3 },
+  { version: 4, name: "account_deletion_state", up: migrationV4 },
 ];
 
 export function latestSchemaVersion(): number {

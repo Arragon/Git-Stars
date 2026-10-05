@@ -1,175 +1,137 @@
-import React, { useEffect, useState, useRef } from "react";
-import { Project } from "../store/useDashboardStore";
-import {
-  analyzeProjectActivity,
-  GitHubRateLimitError,
-  GitHubInvalidRepoError,
-} from "../utils/github";
-import { Flame, TrendingUp, Moon, AlertCircle, Loader2 } from "lucide-react";
+// src/components/ActivityBadge.tsx
+// Repository activity badge: lazily analyzes commit/issue/PR/release activity
+// over the last 30 days via GET /api/github/activity/:owner/:repo when the
+// badge scrolls into view, then caches the result per repository (module-level)
+// so grids of cards do not refetch.
 
-interface ActivityBadgeProps {
-  project: Project;
+import React, { useEffect, useRef, useState } from "react";
+import { Activity } from "lucide-react";
+import { apiGet } from "../utils/api";
+
+interface ActivityDetails {
+  commits: number;
+  issues: number;
+  prs: number;
+  releases: number;
 }
 
-export const ActivityBadge: React.FC<ActivityBadgeProps> = ({ project }) => {
-  const [index, setIndex] = useState<number | null>(
-    project.activity_index ?? null,
+interface ActivityResponse {
+  index: number;
+  details: ActivityDetails;
+  partial: boolean;
+  analyzedAt: string;
+}
+
+const LEVELS: Array<{
+  max: number;
+  label: string;
+  className: string;
+}> = [
+  {
+    max: 0,
+    label: "沉寂",
+    className: "text-muted border-line-strong",
+  },
+  {
+    max: 1,
+    label: "低活跃",
+    className:
+      "text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700",
+  },
+  {
+    max: 2,
+    label: "中等活跃",
+    className:
+      "text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800",
+  },
+  {
+    max: 3,
+    label: "活跃",
+    className:
+      "text-green-700 dark:text-green-300 border-green-200 dark:border-green-800",
+  },
+  {
+    max: 4,
+    label: "非常活跃",
+    className:
+      "text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-700",
+  },
+];
+
+function levelFor(index: number) {
+  return LEVELS.find((l) => index <= l.max) ?? LEVELS[LEVELS.length - 1];
+}
+
+// Module-level per-repo cache: "error" marks a failed analysis (also cached so
+// scrolling grids do not hammer the endpoint).
+const cache = new Map<string, ActivityResponse | "error">();
+
+export const ActivityBadge: React.FC<{
+  owner?: string;
+  repo: string;
+}> = ({ owner, repo }) => {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [data, setData] = useState<ActivityResponse | null>(() => {
+    const cached = owner ? cache.get(`${owner}/${repo}`) : undefined;
+    return cached && cached !== "error" ? cached : null;
+  });
+  const [failed, setFailed] = useState(
+    owner ? cache.get(`${owner}/${repo}`) === "error" : true,
   );
-  const [details, setDetails] = useState(project.activity_details ?? null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<
-    null | "rate_limit" | "invalid" | "unknown"
-  >(null);
-  const badgeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // If we already have recent data, don't re-fetch
-    const hasRecentData =
-      project.activity_analyzed_at &&
-      Date.now() - new Date(project.activity_analyzed_at).getTime() <
-        7 * 24 * 60 * 60 * 1000;
+    if (!owner) return;
+    const key = `${owner}/${repo}`;
+    if (cache.has(key)) return;
 
-    if (hasRecentData && index !== null) {
-      return;
-    }
+    const el = ref.current;
+    if (!el) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) {
-          loadActivity();
-          observer.disconnect();
-        }
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        apiGet<ActivityResponse>(`/api/github/activity/${owner}/${repo}`)
+          .then((r) => {
+            cache.set(key, r);
+            setData(r);
+          })
+          .catch(() => {
+            cache.set(key, "error");
+            setFailed(true);
+          });
       },
-      { threshold: 0.1 },
+      { rootMargin: "120px" },
     );
-
-    if (badgeRef.current) {
-      observer.observe(badgeRef.current);
-    }
-
+    observer.observe(el);
     return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id]);
+  }, [owner, repo]);
 
-  const loadActivity = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await analyzeProjectActivity(project.full_name);
-      setIndex(result.index);
-      setDetails(result.details);
+  if (!owner || failed) return null;
 
-      // Backend already persists activity data to SQLite
-    } catch (err) {
-      console.error("Failed to analyze activity for", project.full_name, err);
-      if (index !== null) {
-        setError(null);
-        return;
-      }
-      if (err instanceof GitHubRateLimitError) {
-        setError("rate_limit");
-        return;
-      }
-      if (err instanceof GitHubInvalidRepoError) {
-        setError("invalid");
-        return;
-      }
-      setError("unknown");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getBadgeContent = () => {
-    if (loading) {
-      return {
-        icon: <Loader2 className="w-3 h-3 animate-spin mr-1" />,
-        text: "Analyzing...",
-        color: "bg-gray-100 text-gray-600 border-gray-200",
-      };
-    }
-
-    if (error) {
-      return {
-        icon: <AlertCircle className="w-3 h-3 mr-1" />,
-        text:
-          error === "rate_limit"
-            ? "Rate limited"
-            : error === "invalid"
-              ? "Invalid repo"
-              : "Unknown",
-        color: "bg-gray-100 text-gray-500 border-gray-200",
-      };
-    }
-
-    if (index === null) {
-      return {
-        icon: <Loader2 className="w-3 h-3 animate-spin mr-1" />,
-        text: "Waiting...",
-        color: "bg-gray-100 text-gray-600 border-gray-200",
-      };
-    }
-
-    if (index >= 80) {
-      return {
-        icon: <Flame className="w-3 h-3 mr-1 text-orange-500" />,
-        text: "Hot",
-        color: "bg-orange-50 text-orange-700 border-orange-200",
-      };
-    } else if (index >= 40) {
-      return {
-        icon: <TrendingUp className="w-3 h-3 mr-1 text-green-500" />,
-        text: "Active",
-        color: "bg-green-50 text-green-700 border-green-200",
-      };
-    } else {
-      return {
-        icon: <Moon className="w-3 h-3 mr-1 text-blue-400" />,
-        text: "Quiet",
-        color: "bg-blue-50 text-blue-700 border-blue-200",
-      };
-    }
-  };
-
-  const content = getBadgeContent();
+  const level = data ? levelFor(data.index) : null;
 
   return (
-    <div className="relative group inline-block" ref={badgeRef}>
-      <span
-        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${content.color}`}
-      >
-        {content.icon}
-        {content.text}{" "}
-        {index !== null && !loading && !error ? `(${index})` : ""}
-      </span>
-
-      {/* Tooltip */}
-      {details && !loading && !error && (
-        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 p-3 bg-gray-900 text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap z-10 pointer-events-none w-48">
-          <div className="font-semibold mb-2 border-b border-gray-700 pb-1.5 text-center">
-            Last 30 Days Activity
-          </div>
-          <div className="grid grid-cols-2 gap-y-2 gap-x-4">
-            <div className="flex justify-between">
-              <span className="text-gray-400">Commits:</span>
-              <span className="font-medium">{details.commits}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-400">PRs:</span>
-              <span className="font-medium">{details.prs}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-400">Issues:</span>
-              <span className="font-medium">{details.issues}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-400">Releases:</span>
-              <span className="font-medium">{details.releases}</span>
-            </div>
-          </div>
-          <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
-        </div>
+    <span ref={ref} className="relative inline-block group">
+      {level ? (
+        <span
+          className={`inline-flex items-center gap-0.5 text-xs border rounded px-1.5 py-0.5 ${level.className}`}
+        >
+          <Activity className="h-3 w-3" />
+          {level.label}
+        </span>
+      ) : (
+        <span className="inline-flex items-center text-xs text-muted opacity-50 border border-transparent">
+          <Activity className="h-3 w-3 animate-pulse" />
+        </span>
       )}
-    </div>
+      {data && (
+        <span className="pointer-events-none absolute left-1/2 bottom-full z-20 mb-1 -translate-x-1/2 hidden group-hover:block whitespace-nowrap rounded-md bg-ink text-surface text-xs px-2.5 py-1.5 shadow-lg">
+          近 30 天：{data.details.commits} commits · {data.details.prs} PRs ·{" "}
+          {data.details.issues} issues · {data.details.releases} releases
+          {data.partial && "（部分数据）"}
+        </span>
+      )}
+    </span>
   );
 };

@@ -227,12 +227,24 @@ export function getRepositoryView(repositoryId: string, userId: string) {
           status: saved.status,
           note: saved.note ?? undefined,
           aiSummary: saved.ai_summary ?? undefined,
+          aiTags: safeParseStringArray(saved.ai_tags),
           version: Number(saved.version),
           addedAt: saved.added_at,
           tags,
         }
       : null,
   };
+}
+
+function safeParseStringArray(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((x): x is string => typeof x === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 // On-demand metadata refresh from the provider (writes through the cache).

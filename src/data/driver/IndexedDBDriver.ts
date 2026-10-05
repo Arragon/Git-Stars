@@ -96,6 +96,27 @@ export class IndexedDBDriver implements LocalStoreDriver {
     });
   }
 
+  async destroy(): Promise<void> {
+    // Cache recovery path: usable even when open() failed (e.g. a newer schema
+    // version written by a future app build). Close first, then delete.
+    try {
+      this.db?.close();
+    } catch {
+      // already closed
+    }
+    this.db = null;
+    return new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(this.dbName);
+      request.onsuccess = () => resolve();
+      request.onerror = () =>
+        reject(
+          new Error(`Failed to destroy database: ${request.error?.message}`),
+        );
+      request.onblocked = () =>
+        reject(new Error("Destroy blocked by another connection."));
+    });
+  }
+
   async getVersion(): Promise<number> {
     if (!this.db) throw new Error("Database not open.");
 
