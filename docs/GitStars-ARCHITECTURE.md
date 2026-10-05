@@ -895,36 +895,55 @@ When Tell Me More V0 is implemented, let the actual first use case define its se
 
 ## 31. Default deployment
 
-Recommended default:
-
-```text
-Frontend:
-Vercel / Cloudflare Pages / Netlify / static server
-
-Backend:
-user-owned managed Supabase project
-
-Forge credentials:
-user-owned
-
-AI credentials:
-user-owned
-```
-
-Full self-hosted Supabase/Docker is an advanced deployment path, not the architecture's default optimization target.
-
-**Current implementation baseline (2024-09 update)**: The repository has migrated from Supabase to a local Node.js/Hono/SQLite backend. The default deployment is now:
+**Current default (local-first)**: a single long-running Node.js process owned by the user.
 
 ```text
 Single Node.js process:
 - Hono HTTP server (port 3001)
-- Serves both /api/* and static dist/ (SPA fallback)
-- SQLite database (data/gitstars.db)
+- Serves both /api/* and static dist/ (SPA fallback), same origin
+- SQLite database file (data/gitstars.db) via node:sqlite
 - GitHub OAuth handled server-side
 - No external database service required
 ```
 
-This aligns with invariant I3 (user-owned deployment) while eliminating the Supabase cloud dependency. See `docs/LOCAL-BACKEND.md` for the new architecture details.
+Forge credentials and AI credentials remain user-owned.
+
+### Static hosting platforms are not supported
+
+Vercel / Netlify / Cloudflare Pages / any static-only host **cannot** run this backend.
+Deploying there produces a site that loads but cannot function. Three hard constraints:
+
+- **Writable persistent disk**: `server/db.ts` opens a local SQLite file (`node:sqlite`
+  `DatabaseSync`). Serverless filesystems are read-only outside `/tmp`, and `/tmp` is
+  ephemeral and per-instance, so data does not survive an invocation.
+- **Resident process state**: `server/session.ts` stores sessions in that same SQLite file
+  and relies on a long-lived `setInterval` for renewal cleanup. Serverless instances share
+  no state and do not keep timers running, so login state cannot be maintained.
+- **Long-running sync**: a full sync issues many sequential upstream GitHub requests and
+  will hit serverless execution time limits.
+
+The client also assumes same-origin: `src/utils/api.ts` calls `fetch("/api/...")` with no
+configurable base URL. In development `vite.config.ts` proxies `/api` to `localhost:3001`;
+in production the server itself serves both. A static host provides neither, so every API
+call 404s. If an SPA fallback instead returns `index.html` with HTTP 200, `api.ts` silently
+yields `null` because the response is not JSON, surfacing as missing data rather than as an
+error.
+
+Serving the frontend from a static host is possible only after making the API base URL
+configurable and solving cross-site cookies (CORS, `COOKIE_SECURE`, SameSite). The backend
+still needs a host offering a resident process and persistent disk (VPS, container,
+Fly.io, Railway).
+
+**Superseded (Supabase era)**: the former recommendation of a static frontend on
+Vercel/Cloudflare Pages/Netlify plus a user-owned managed Supabase project no longer
+applies, and full self-hosted Supabase/Docker is no longer an advanced path worth
+optimizing for. The Supabase client, migrations, pgTAP tests, and `vercel.json` have been
+removed from the repository. Note that deleting those files does **not** disconnect an
+existing Vercel Git integration: that must be done in the Vercel dashboard under
+Settings -> Git -> Disconnect. Otherwise every push keeps building a non-functional static
+bundle and reports success.
+
+This aligns with invariant I3 (user-owned deployment) while eliminating the Supabase cloud dependency, and with ADR-0003 D5 (local deployment is a first-class, permanent profile). See `docs/LOCAL-BACKEND.md` for the new architecture details.
 
 **M0 contract update (2026-09-05):** The Linear M0 milestone froze the forward architecture in `docs/adr/` (index: `docs/adr/README.md`). Two decisions refine this section:
 
