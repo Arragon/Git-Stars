@@ -9,6 +9,7 @@ const getUnresolved = vi.fn();
 const clearUserState = vi.fn();
 const postLogout = vi.fn();
 const reset = vi.fn();
+const clearSecret = vi.fn();
 
 vi.mock("../sync/syncClient", () => ({
   mutationQueue: { countAll: (...args: unknown[]) => countAll(...args) },
@@ -26,6 +27,9 @@ vi.mock("./gitstarsApi", () => ({
 }));
 vi.mock("../store/useSyncStatusStore", () => ({
   useSyncStatusStore: { getState: () => ({ reset }) },
+}));
+vi.mock("../store/useAiConfigStore", () => ({
+  useAiConfigStore: { getState: () => ({ clearSecret }) },
 }));
 
 import {
@@ -111,6 +115,7 @@ describe("signOutAndResetLocal", () => {
   it("preserves the queue by default", async () => {
     await signOutAndResetLocal();
     expect(clearUserState).toHaveBeenCalledWith({ includeQueue: false });
+    expect(clearSecret).toHaveBeenCalled();
     expect(reset).toHaveBeenCalled();
   });
 

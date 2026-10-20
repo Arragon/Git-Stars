@@ -9,15 +9,16 @@ import { createConflictLog } from "./conflictLog";
 import { createPushReplay } from "./pushReplay";
 import { createPullSync } from "./pullSync";
 import { createIdResolver } from "./idMap";
+import { getAccountScope } from "./accountScope";
 import { getChanges } from "../utils/gitstarsApi";
 import { apiPut, apiPost, apiDelete } from "../utils/api";
 import type { MutationResponse } from "./pushReplay";
 
 // --- Sync singletons ---
 
-export const mutationQueue = createMutationQueue(localStore);
+export const mutationQueue = createMutationQueue(localStore, getAccountScope);
 export const conflictLog = createConflictLog(localStore);
-export const syncIdResolver = createIdResolver(localStore);
+export const syncIdResolver = createIdResolver(localStore, getAccountScope);
 
 // Full etag form expected by the server's If-Match parser (ADR-0004 D2).
 export function buildIfMatch(entityId: string, version: number): string {

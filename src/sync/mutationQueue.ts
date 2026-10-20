@@ -3,6 +3,7 @@
 // Persists mutations through app crash/restart via the client data driver.
 
 import type { LocalStoreDriver, QueuedMutation } from "../data/types";
+import { getAccountScope, isVisibleToScope } from "./accountScope";
 
 export interface MutationQueue {
   enqueue(
@@ -27,7 +28,31 @@ export interface MutationQueue {
 
 const MAX_RETRY_COUNT = 3;
 
-export function createMutationQueue(driver: LocalStoreDriver): MutationQueue {
+export function createMutationQueue(
+  driver: LocalStoreDriver,
+  getOwnerId: () => string | null = getAccountScope,
+): MutationQueue {
+  // Legacy entries (pre-M8-X) have no owner: the first signed-in scope claims them so an
+  // upgrade never strands pending work, and later accounts cannot see them.
+  async function claimUnowned(ownerId: string): Promise<void> {
+    const all = await driver.getAll<QueuedMutation>("mutationQueue");
+    for (const mutation of all) {
+      if (!mutation.ownerId) {
+        await driver.put<QueuedMutation>("mutationQueue", {
+          ...mutation,
+          ownerId,
+        });
+      }
+    }
+  }
+
+  async function scopedAll(): Promise<QueuedMutation[]> {
+    const owner = getOwnerId();
+    if (owner) await claimUnowned(owner);
+    const all = await driver.getAll<QueuedMutation>("mutationQueue");
+    return all.filter((m) => isVisibleToScope(m.ownerId, owner));
+  }
+
   async function enqueue(
     partial: Omit<QueuedMutation, "id" | "createdAt" | "retryCount" | "status">,
   ): Promise<string> {
@@ -35,12 +60,14 @@ export function createMutationQueue(driver: LocalStoreDriver): MutationQueue {
       ? globalThis.crypto.randomUUID()
       : String(Math.random());
 
+    const ownerId = getOwnerId() ?? undefined;
     const mutation: QueuedMutation = {
       ...partial,
       id,
       createdAt: new Date().toISOString(),
       retryCount: 0,
       status: "pending",
+      ...(ownerId ? { ownerId } : {}),
     };
 
     await driver.put("mutationQueue", mutation);
@@ -48,14 +75,14 @@ export function createMutationQueue(driver: LocalStoreDriver): MutationQueue {
   }
 
   async function getPending(): Promise<QueuedMutation[]> {
-    const all = await driver.getAll<QueuedMutation>("mutationQueue");
+    const all = await scopedAll();
     return all
       .filter((m) => m.status !== "quarantined")
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   async function getAll(): Promise<QueuedMutation[]> {
-    const all = await driver.getAll<QueuedMutation>("mutationQueue");
+    const all = await scopedAll();
     return all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
@@ -64,7 +91,7 @@ export function createMutationQueue(driver: LocalStoreDriver): MutationQueue {
     quarantined: number;
     total: number;
   }> {
-    const all = await driver.getAll<QueuedMutation>("mutationQueue");
+    const all = await scopedAll();
     const quarantined = all.filter((m) => m.status === "quarantined").length;
     return {
       pending: all.length - quarantined,

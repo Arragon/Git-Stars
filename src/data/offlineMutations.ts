@@ -39,6 +39,7 @@ import type {
 } from "./types";
 import { mutationQueue, conflictLog, buildIfMatch } from "../sync/syncClient";
 import { createIdResolver } from "../sync/idMap";
+import { getAccountScope } from "../sync/accountScope";
 import { ApiError, apiDelete, apiPut, apiPost } from "../utils/api";
 import type {
   ListDetail,
@@ -130,6 +131,7 @@ async function enqueueAndAttempt<T>(
         status: "pending",
         ...(spec.createsTempId ? { createsTempId: spec.createsTempId } : {}),
         ...(spec.refs && spec.refs.length > 0 ? { refs: spec.refs } : {}),
+        ...(getAccountScope() ? { ownerId: getAccountScope()! } : {}),
       };
       tx.put<QueuedMutation>("mutationQueue", entry);
     },

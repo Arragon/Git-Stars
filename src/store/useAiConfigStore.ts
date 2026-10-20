@@ -24,6 +24,8 @@ interface AiConfigState {
   /** Switch preset: apply its baseUrl/defaultModel unless explicitly overridden. */
   applyPreset: (presetId: string) => void;
   setFetchedModels: (models: string[]) => void;
+  /** Drop the stored API key (sign-out / account switch). */
+  clearSecret: () => void;
   isConfigured: () => boolean;
 }
 
@@ -63,6 +65,8 @@ export const useAiConfigStore = create<AiConfigState>()(
         }),
       setFetchedModels: (fetchedModels) =>
         set((state) => ({ config: { ...state.config, fetchedModels } })),
+      clearSecret: () =>
+        set((state) => ({ config: { ...state.config, apiKey: "" } })),
       isConfigured: () => {
         const { config } = get();
         return (

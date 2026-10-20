@@ -9,6 +9,7 @@ import { postLogout } from "./gitstarsApi";
 import { localStore } from "../data";
 import { mutationQueue, conflictLog } from "../sync/syncClient";
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
+import { useAiConfigStore } from "../store/useAiConfigStore";
 
 export interface UnsyncedSummary {
   pending: number;
@@ -73,5 +74,7 @@ export async function signOutAndResetLocal(
   } catch (error) {
     console.error("[session] Failed to clear local cache:", error);
   }
+  // The AI key is a per-account secret: never leave it behind for the next account.
+  useAiConfigStore.getState().clearSecret();
   useSyncStatusStore.getState().reset();
 }
