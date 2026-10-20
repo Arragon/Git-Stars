@@ -39,6 +39,7 @@ import {
   serializeLibraryRoute,
 } from "../lib/libraryRouteState";
 import { summarizeProject } from "../utils/ai";
+import { AiAbortError } from "../ai/client";
 import { useAiConfigStore } from "../store/useAiConfigStore";
 import {
   matchCachedRepository,
@@ -198,6 +199,7 @@ export const Library: React.FC = () => {
   const [batch, setBatch] = useState<BatchState | null>(null);
   const [batchOpen, setBatchOpen] = useState(false);
   const batchStopRef = useRef(false);
+  const batchAbortRef = useRef<AbortController | null>(null);
   const itemsRef = useRef<SavedRepository[]>([]);
   itemsRef.current = items;
 
@@ -530,6 +532,7 @@ export const Library: React.FC = () => {
       return;
     }
     batchStopRef.current = false;
+    batchAbortRef.current = new AbortController();
     setBatch({ mode, total: targets.length, done: 0, failed: 0, current: "" });
     setBatchOpen(false);
     let done = 0;
@@ -544,6 +547,7 @@ export const Library: React.FC = () => {
           it.repository.description ?? "",
           it.repository.primaryLanguage ?? "",
           it.tags.map((t) => t.name),
+          { signal: batchAbortRef.current?.signal },
         );
         const res = await updateSaved(
           it.id,
@@ -562,7 +566,9 @@ export const Library: React.FC = () => {
               : row,
           ),
         );
-      } catch {
+      } catch (error) {
+        // A user cancel is not a failure: stop without counting the item (M8-08).
+        if (error instanceof AiAbortError) break;
         failed++;
       }
       done++;
@@ -690,6 +696,7 @@ export const Library: React.FC = () => {
               size="xs"
               onClick={() => {
                 batchStopRef.current = true;
+                batchAbortRef.current?.abort();
               }}
             >
               暂停

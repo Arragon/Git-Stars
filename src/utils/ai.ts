@@ -52,6 +52,7 @@ export async function summarizeProject(
   description: string,
   language: string,
   existingTags: string[] = [],
+  options: { signal?: AbortSignal } = {},
 ) {
   const { config, isConfigured } = useAiConfigStore.getState();
 
@@ -103,7 +104,7 @@ You MUST return ONLY a valid JSON object in the following format, with no markdo
         model: config.model,
       },
       prompt,
-      { jsonMode: true },
+      { jsonMode: true, signal: options.signal },
     );
 
     const result = parseJsonObjectFromText(jsonString);
