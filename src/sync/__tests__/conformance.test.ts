@@ -1045,7 +1045,9 @@ describe("Determinism", () => {
     const stripTimestamps = (
       log: Array<{ createdAt: string } & Record<string, unknown>>,
     ) => log.map(({ createdAt: _createdAt, ...rest }) => rest);
-    expect(stripTimestamps(s1.changeLog)).toEqual(stripTimestamps(s2.changeLog));
+    expect(stripTimestamps(s1.changeLog)).toEqual(
+      stripTimestamps(s2.changeLog),
+    );
     expect(Array.from(s1.entities.entries())).toEqual(
       Array.from(s2.entities.entries()),
     );
