@@ -66,8 +66,10 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p release
+          # src/lib/list-format.ts is imported by the server at runtime (portable list
+          # format is isomorphic); the artifact must ship it or `npm start` crashes.
           tar czf "release/gitstars-${VERSION}-server.tar.gz" \
-            dist server package.json package-lock.json \
+            dist server src/lib/list-format.ts package.json package-lock.json \
             server/openapi.yaml
           cp dist/index.html release/gitstars-${VERSION}-client-static.html 2>/dev/null || true
 
