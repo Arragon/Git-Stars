@@ -15,7 +15,10 @@ export function sanitizeReturnTo(
   if (!value || value.length > MAX_LENGTH) return fallback;
   if (!value.startsWith("/") || value.startsWith("//")) return fallback;
   if (value.includes("\\")) return fallback;
-  if (/[\u0000-\u001f\u007f]/.test(value)) return fallback;
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return fallback;
+  }
   // API/auth endpoints are not a user-facing destination.
   if (value.startsWith("/api/")) return fallback;
   try {
