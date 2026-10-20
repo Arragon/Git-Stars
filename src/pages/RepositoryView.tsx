@@ -6,7 +6,7 @@
 // note + tag mutations via offline helpers, AI summary regeneration.
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowLeft,
@@ -70,6 +70,7 @@ import {
 import { ActivityBadge } from "../components/ActivityBadge";
 import { Dialog, EmptyState, SkeletonCard } from "../components/ui";
 import { repoEmblem } from "../lib/utils";
+import { safeReturnPath } from "../lib/libraryRouteState";
 
 type Tab = "readme" | "files" | "releases";
 
@@ -87,6 +88,9 @@ const friendly = (e: unknown, fallback: string): string =>
 export const RepositoryView: React.FC = () => {
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // M8-04: return to the exact Library filter/scroll context the user came from.
+  const returnTo = safeReturnPath(searchParams.get("from"));
   const showToast = useToastStore((s) => s.showToast);
   const [repo, setRepo] = useState<RepositoryDetailView | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -552,7 +556,7 @@ export const RepositoryView: React.FC = () => {
                 <button
                   type="button"
                   className="btn primary"
-                  onClick={() => navigate("/library")}
+                  onClick={() => navigate(returnTo)}
                 >
                   <ArrowLeft className="ico" /> 返回收藏库
                 </button>

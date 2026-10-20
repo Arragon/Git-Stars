@@ -9,7 +9,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Bookmark,
   RefreshCw,
@@ -34,6 +34,10 @@ import {
   type Tag,
 } from "../utils/gitstarsApi";
 import { ApiError, apiPut } from "../utils/api";
+import {
+  parseLibraryRoute,
+  serializeLibraryRoute,
+} from "../lib/libraryRouteState";
 import { summarizeProject } from "../utils/ai";
 import { useAiConfigStore } from "../store/useAiConfigStore";
 import {
@@ -137,7 +141,12 @@ export const Library: React.FC = () => {
   const [items, setItems] = useState<SavedRepository[]>([]);
   const [allItems, setAllItems] = useState<SavedRepository[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
-  const [filters, setFilters] = useState<LibraryFilters>(EMPTY_LIBRARY_FILTERS);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // M8-04: the URL is the source of truth for query/filters, so back/forward and a
+  // shared link both restore the same visible set.
+  const [filters, setFilters] = useState<LibraryFilters>(() =>
+    parseLibraryRoute(searchParams.toString()),
+  );
   // Honor the 默认浏览方式 preference saved in Settings (localStorage).
   const [view, setView] = useState<"grid" | "list">(() => {
     try {
@@ -266,6 +275,29 @@ export const Library: React.FC = () => {
   useEffect(() => {
     setItems(applyLibraryFilters(allItems, filters));
   }, [allItems, filters]);
+
+  // Reflect filters into the URL (replace, so typing does not spam history).
+  useEffect(() => {
+    const target = new URLSearchParams(
+      serializeLibraryRoute(filters),
+    ).toString();
+    if (target !== searchParams.toString()) {
+      setSearchParams(target, { replace: true });
+    }
+  }, [filters, searchParams, setSearchParams]);
+
+  // Restore the scroll position for this exact filter state, and keep it updated so
+  // returning from Repository View lands where the user left.
+  useEffect(() => {
+    const key = `library:scroll:${serializeLibraryRoute(filters)}`;
+    const saved = Number(sessionStorage.getItem(key) ?? "0");
+    if (saved > 0) {
+      requestAnimationFrame(() => window.scrollTo(0, saved));
+    }
+    const onScroll = () => sessionStorage.setItem(key, String(window.scrollY));
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [filters]);
 
   const loadLists = useCallback(async () => {
     try {
@@ -1213,7 +1245,9 @@ export const Library: React.FC = () => {
                       <div className="repo-name-wrap">
                         <Link
                           className="repo-title"
-                          to={`/repository/${it.repository.id}`}
+                          to={`/repository/${it.repository.id}?from=${encodeURIComponent(
+                            `/library${serializeLibraryRoute(filters)}`,
+                          )}`}
                         >
                           {it.repository.name}
                         </Link>
@@ -1345,7 +1379,9 @@ export const Library: React.FC = () => {
                       <div className="grow">
                         <Link
                           className="repo-title"
-                          to={`/repository/${it.repository.id}`}
+                          to={`/repository/${it.repository.id}?from=${encodeURIComponent(
+                            `/library${serializeLibraryRoute(filters)}`,
+                          )}`}
                         >
                           {it.repository.namespacePath
                             ? `${it.repository.namespacePath}/`
