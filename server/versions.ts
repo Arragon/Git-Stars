@@ -10,5 +10,6 @@ export const MIN_APP_VERSION = "0.1.0";
 export const PROTOCOL_VERSION = 1;
 export const MIN_PROTOCOL_VERSION = 1;
 
-// Portable List draft schema version (INH-384); stays 0 until GitHub+GitLab round-trip.
-export const LIST_SCHEMA_VERSION = 0;
+// Portable List draft schema version (INH-384). v1 adds the second note kind and keeps
+// importing v0 files (M7-12 / INH-1707).
+export const LIST_SCHEMA_VERSION = 1;

@@ -59,6 +59,14 @@ import {
 } from "../data/offlineMutations";
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
 import { useToastStore } from "../store/useToastStore";
+import { useSyncDrawerStore } from "../store/useSyncDrawerStore";
+import {
+  INITIAL_NOTE_SAVE,
+  noteSaveReducer,
+  noteStatusLabel,
+  statusFromOutcome,
+  type NoteSaveState,
+} from "../utils/noteSaveState";
 import { ActivityBadge } from "../components/ActivityBadge";
 import { Dialog, EmptyState, SkeletonCard } from "../components/ui";
 import { repoEmblem } from "../lib/utils";
@@ -91,6 +99,23 @@ export const RepositoryView: React.FC = () => {
   const [tagName, setTagName] = useState("");
   const tagInputRef = useRef<HTMLInputElement>(null);
   const isOnline = useSyncStatusStore((s) => s.isOnline);
+  // M7-14: the note editor is controlled by a draft that is never overwritten after a
+  // failed/conflicted save, and the status line reflects the real sync state.
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteState, setNoteState] = useState<NoteSaveState>(INITIAL_NOTE_SAVE);
+  const lastSyncedNote = useRef<string | null>(null);
+
+  // Mirror the authoritative note into the draft, but never clobber a failed/conflicted
+  // draft that the user still needs to recover (M7-14).
+  useEffect(() => {
+    if (noteState.status === "failed" || noteState.status === "conflict")
+      return;
+    const value = repo?.saved?.note ?? "";
+    if (value !== lastSyncedNote.current) {
+      lastSyncedNote.current = value;
+      setNoteDraft(value);
+    }
+  }, [repo?.saved?.note, noteState.status]);
 
   const [readme, setReadme] = useState<string | null>(null);
   const [entries, setEntries] = useState<TreeEntryView[] | null>(null);
@@ -232,7 +257,7 @@ export const RepositoryView: React.FC = () => {
   /** Run an offline-capable mutation with an immediate optimistic UI patch. */
   const act = async (
     fn: () => Promise<MutationOutcome<unknown>>,
-    onApplied?: () => void,
+    onApplied?: (out: MutationOutcome<unknown>) => void,
   ) => {
     setBusy(true);
     setError("");
@@ -244,7 +269,9 @@ export const RepositoryView: React.FC = () => {
       } else if (!out.confirmed) {
         setNotice("离线：更改已保存到本地，联网后自动同步");
       }
-      onApplied?.();
+      // M7-14: a failed save must NOT apply the optimistic patch (note/version would
+      // otherwise advance even though the server rejected the write).
+      if (!out.error) onApplied?.(out);
       if (out.confirmed) await load();
       else if (!out.error) await hydrate();
     } finally {
@@ -312,6 +339,48 @@ export const RepositoryView: React.FC = () => {
     } catch (err) {
       setError(friendly(err, "操作失败，请重试"));
     }
+  };
+
+  /** Persist the note draft with honest, field-level status (M7-14 / INH-1708). */
+  const saveNote = async (value: string) => {
+    if (!repo?.saved) return;
+    if (value === (repo.saved.note ?? "")) return;
+    setNoteState({ status: "saving" });
+    await act(
+      () =>
+        updateSavedFields(
+          { id: repo.saved!.id, version: repo.saved!.version },
+          { note: value },
+        ),
+      (out) => {
+        const status = statusFromOutcome(out);
+        if (status === "confirmed") {
+          const serverVersion = Number(
+            (out.response as { version?: number } | null)?.version ?? 0,
+          );
+          setRepo((current) =>
+            current?.saved
+              ? {
+                  ...current,
+                  saved: {
+                    ...current.saved,
+                    note: value,
+                    version: serverVersion || current.saved.version + 1,
+                  },
+                }
+              : current,
+          );
+          setNoteState({ status: "confirmed" });
+        } else if (status === "conflict") {
+          setNoteState({ status: "conflict", error: outcomeErrorLabel(out) });
+        } else if (status === "failed") {
+          setNoteState({ status: "failed", error: outcomeErrorLabel(out) });
+        } else {
+          // Queued locally: the draft is safe, but the version is NOT advanced.
+          setNoteState({ status: "pending" });
+        }
+      },
+    );
   };
 
   if (!repo) {
@@ -693,35 +762,40 @@ export const RepositoryView: React.FC = () => {
                   className="field"
                   aria-label="个人备注"
                   placeholder="记录你的使用场景、待验证问题…"
-                  defaultValue={repo.saved.note ?? ""}
-                  onBlur={(e) => {
-                    const v = e.target.value;
-                    if (v === (repo.saved?.note ?? "")) return;
-                    void act(
-                      () =>
-                        updateSavedFields(
-                          { id: repo.saved!.id, version: repo.saved!.version },
-                          { note: v },
-                        ),
-                      () =>
-                        setRepo({
-                          ...repo,
-                          saved: repo.saved
-                            ? {
-                                ...repo.saved,
-                                note: v,
-                                version: repo.saved.version + 1,
-                              }
-                            : repo.saved,
-                        }),
-                    );
+                  value={noteDraft}
+                  onChange={(e) => {
+                    setNoteDraft(e.target.value);
+                    setNoteState((s) => noteSaveReducer(s, { type: "edit" }));
                   }}
+                  onBlur={(e) => void saveNote(e.target.value)}
                 />
-                <div className="save-state">
-                  <Check className="ico small" />
-                  {offline
-                    ? "编辑后保存在本地，等待同步"
-                    : "停止输入后自动保存"}
+                <div className={`save-state ${noteState.status}`} role="status">
+                  {noteState.status === "failed" ||
+                  noteState.status === "conflict" ? (
+                    <AlertCircle className="ico small" />
+                  ) : (
+                    <Check className="ico small" />
+                  )}
+                  <span>{noteStatusLabel(noteState.status)}</span>
+                  {(noteState.status === "failed" ||
+                    noteState.status === "conflict") && (
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      onClick={() => void saveNote(noteDraft)}
+                    >
+                      <RotateCw className="ico small" /> 重试
+                    </button>
+                  )}
+                  {noteState.status === "conflict" && (
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      onClick={() => useSyncDrawerStore.getState().toggle()}
+                    >
+                      处理冲突
+                    </button>
+                  )}
                 </div>
               </section>
 

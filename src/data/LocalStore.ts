@@ -13,6 +13,7 @@ import type {
   CachedListItem,
   CachedPreferences,
   SyncCursor,
+  IdMapEntry,
 } from "./types";
 
 export class LocalStore {
@@ -83,6 +84,21 @@ export class LocalStore {
     return this.driver.get<CachedSavedRepository>("savedRepositories", id);
   }
 
+  // Temp id -> server id map (M7-04). Survives restarts so dependent mutations can be
+  // rewritten after a create ACK, including ACK loss followed by an idempotent replay.
+  getIdMapEntry(tempId: string) {
+    return this.driver.get<IdMapEntry>("idMap", tempId);
+  }
+  putIdMapEntry(entry: IdMapEntry) {
+    return this.driver.put("idMap", entry);
+  }
+  getIdMapEntries() {
+    return this.driver.getAll<IdMapEntry>("idMap");
+  }
+  deleteIdMapEntry(tempId: string) {
+    return this.driver.delete("idMap", tempId);
+  }
+
   getTags() {
     return this.driver.getAll<CachedTag>("tags");
   }
@@ -132,7 +148,7 @@ export class LocalStore {
   clearRepositoryCache() {
     return this.driver.clearRepositoryCache();
   }
-  clearUserState() {
-    return this.driver.clearUserState();
+  clearUserState(options?: { includeQueue?: boolean }) {
+    return this.driver.clearUserState(options);
   }
 }

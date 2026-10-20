@@ -571,7 +571,7 @@ describe("publication service (M5)", () => {
     expect(list.deleted_at).toBeNull();
   });
 
-  it("snapshotToPortable yields a valid PortableList v0 of available items only", () => {
+  it("snapshotToPortable yields a valid PortableList v1 of available items only", () => {
     const { publication } = publish(OWNER, "list-1") as Extract<
       ReturnType<typeof publish>,
       { ok: true }
@@ -579,7 +579,8 @@ describe("publication service (M5)", () => {
     const snap = getPublicSnapshot(publication.shareId)!;
     const doc = snapshotToPortable(snap);
     expect(doc.format).toBe("gitstars-list");
-    expect(doc.schema_version).toBe(0);
+    // M7-12: the portable format is v1 (adds the list-item note kind); v0 stays importable.
+    expect(doc.schema_version).toBe(1);
     expect(doc.title).toBe("My Reading (imported)");
     expect(doc.items).toHaveLength(2);
     expect(doc.items[0].source).toMatchObject({

@@ -17,6 +17,7 @@ All artifact names/versions in this document come from the generated
 - [ ] `npm run api:check` (contract valid; PRs additionally diffed vs base)
 - [ ] `npm run build`
 - [ ] `npm run migration:check` — migrations apply cleanly on a throwaway DB
+- [ ] `npm run drill:backup` — backup/restore/rollback drill passes (M7-11)
 
 ## Artifacts
 
@@ -32,15 +33,22 @@ All artifact names/versions in this document come from the generated
 
 ## Deploy (server)
 
-1. Back up the current deployment and its `data/` directory (including `-wal`/
-   `-shm`) BEFORE unpacking the new artifact.
+1. Back up the current deployment and its `data/` directory BEFORE unpacking the
+   new artifact. Checkpoint first so the copy is consistent:
+   `sqlite3 data/gitstars.db 'PRAGMA wal_checkpoint(TRUNCATE)'`, then copy
+   `data/gitstars.db`, `data/gitstars.db-wal` and `data/gitstars.db-shm` together.
+   (`node:sqlite` exposes no online backup API; checkpoint + file copy is the
+   supported method — see `scripts/drill-backup-restore.ts`.)
 2. Unpack `gitstars-<version>-server.tar.gz`; keep the existing `data/` directory.
 3. Set required env (`SESSION_SECRET`, optionally `CREDENTIAL_KEY`,
    `GITHUB_CLIENT_ID/SECRET`, `ADMIN_TOKEN`). See docs/DEVELOPMENT.md.
 4. `npm ci --omit=dev` and start: `npm start` (single process serves API + dist/).
-5. Verify: `GET /api/health` reports the new `appVersion`/`schemaVersion` and
-   provider configuration; `schemaVersion` must match `manifest.json`'s expected
-   latest value.
+5. Verify version provenance against the manifest (M7-09):
+   `jq -r '.version' manifest.json` must equal
+   `curl -s localhost:3001/api/health | jq -r '.appVersion'`, and
+   `schemaVersion` must match the expected latest value.
+6. Confirm the process serves both API and static UI: `curl -I http://localhost:3001/`
+   returns the SPA HTML.
 
 ## Upgrade / data retention
 
@@ -65,3 +73,4 @@ All artifact names/versions in this document come from the generated
 - Watch `http_request` / `sync_run` / `auth_failure` structured logs (server/lib/obs.ts).
 - Runbook entry points: docs/runbooks/ (provider-outage, db-migration-failure,
   sync-backlog, credential-issue, hub-abuse-spike).
+- Drill evidence: docs/runbooks/DRILL-LOG.md (append the run after each release).

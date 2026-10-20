@@ -178,8 +178,16 @@ listRoutes.put("/:id", async (c) => {
 
   const ifMatch = parseIfMatch(c.req.header("If-Match"));
   if (ifMatch && ifMatch.version !== Number(list.version)) {
+    // Same contract as Library (M7-14): the current business state, plus the etag for
+    // clients that only track versions.
     return apiError(c, 409, "VERSION_CONFLICT", "List was modified", {
-      current: makeEtag(id, Number(list.version)),
+      current: {
+        id,
+        name: list.name,
+        description: list.description,
+        version: Number(list.version),
+      },
+      etag: makeEtag(id, Number(list.version)),
     });
   }
 
@@ -254,7 +262,12 @@ listRoutes.put("/:id/items", async (c) => {
   const list = loadOwnedList(id, userId);
   if (!list) return apiError(c, 404, "NOT_FOUND", "List not found");
 
-  let body: { add?: unknown; remove?: unknown; reorder?: unknown };
+  let body: {
+    add?: unknown;
+    remove?: unknown;
+    reorder?: unknown;
+    notes?: unknown;
+  };
   try {
     body = await c.req.json();
   } catch {
@@ -265,6 +278,21 @@ listRoutes.put("/:id/items", async (c) => {
   const add = strArray(body.add);
   const remove = strArray(body.remove);
   const reorder = strArray(body.reorder);
+  // Per-list-item note edits (M7-12): the second note kind alongside saved_repositories.note.
+  const notes = Array.isArray(body.notes)
+    ? (body.notes as unknown[])
+        .filter(
+          (entry): entry is { savedRepositoryId: string; note?: unknown } =>
+            typeof entry === "object" &&
+            entry !== null &&
+            typeof (entry as { savedRepositoryId?: unknown })
+              .savedRepositoryId === "string",
+        )
+        .map((entry) => ({
+          savedRepositoryId: entry.savedRepositoryId,
+          note: typeof entry.note === "string" ? entry.note : "",
+        }))
+    : [];
 
   const db = getDb();
   const nowIso = new Date().toISOString();
@@ -356,6 +384,22 @@ listRoutes.put("/:id/items", async (c) => {
         // Update the map for subsequent iterations.
         keyBySavedId.set(savedId, newKey);
       }
+    }
+
+    // Per-item notes (independent of membership and ordering).
+    for (const entry of notes) {
+      const item = db
+        .prepare(
+          "SELECT id, version FROM list_items WHERE list_id = ? AND saved_repository_id = ?",
+        )
+        .get(id, entry.savedRepositoryId) as unknown as
+        { id: string; version: number } | undefined;
+      if (!item) continue;
+      const nextVersion = Number(item.version) + 1;
+      db.prepare(
+        "UPDATE list_items SET note = ?, version = ?, updated_at = ? WHERE id = ?",
+      ).run(entry.note, nextVersion, nowIso, item.id);
+      recordChange(userId, "list_item", item.id, "updated", nextVersion);
     }
 
     const nextListVersion = Number(list.version) + 1;

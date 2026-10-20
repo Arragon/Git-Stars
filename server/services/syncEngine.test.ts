@@ -92,7 +92,9 @@ describe("sync engine invariants (ARCHITECTURE.md 15, ADR-0004)", () => {
 
   const starred = (body: unknown): Array<[string, Route]> => [
     ["/user/starred", { status: 200, body }],
-    ["/users/alice/repos", { status: 200, body: [] }],
+    // M7-06: authenticated fork listing reads owned repos from /user/repos and filters
+    // `fork: true`; it no longer uses the invalid /users/{u}/repos?type=forks query.
+    ["/user/repos", { status: 200, body: [] }],
   ];
 
   it("populates the new domain and is idempotent across re-runs", async () => {
@@ -136,7 +138,7 @@ describe("sync engine invariants (ARCHITECTURE.md 15, ADR-0004)", () => {
           body: { message: "API rate limit exceeded" },
         },
       ],
-      ["/users/alice/repos", { status: 200, body: [] }],
+      ["/user/repos", { status: 200, body: [] }],
     ]);
     const result = await syncProvider("u1", "github");
     expect(result.ok).toBe(false);
@@ -186,7 +188,7 @@ describe("sync engine invariants (ARCHITECTURE.md 15, ADR-0004)", () => {
     }));
     stubFetch([
       ["/user/starred", { status: 200, body: bigPage }],
-      ["/users/alice/repos", { status: 200, body: [] }],
+      ["/user/repos", { status: 200, body: [] }],
     ]);
 
     const result = await syncProvider("u1", "github");
@@ -195,5 +197,162 @@ describe("sync engine invariants (ARCHITECTURE.md 15, ADR-0004)", () => {
       .prepare("SELECT active FROM remote_memberships WHERE id='mx'")
       .get() as { active: number };
     expect(membership.active).toBe(1); // not falsely deactivated by a truncated reconcile
+  });
+
+  // --- M7-05: honest completion + resumable page cursor -----------------------------
+
+  const pageOf = (page: number, count = 100) =>
+    Array.from({ length: count }, (_, i) => ({
+      starred_at: "2026-01-01T00:00:00Z",
+      repo: {
+        id: page * 1000 + i,
+        name: `r${page}-${i}`,
+        full_name: `o/r${page}-${i}`,
+        html_url: `https://github.com/o/r${page}-${i}`,
+        stargazers_count: 0,
+        forks_count: 0,
+        private: false,
+        owner: { login: "o" },
+      },
+    }));
+
+  function stubPagedFetch(
+    handler: (url: string) => {
+      status: number;
+      body: unknown;
+      headers?: Record<string, string>;
+    },
+  ): string[] {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL): Promise<Response> => {
+        const url = typeof input === "string" ? input : input.toString();
+        urls.push(url);
+        const route = handler(url);
+        return new Response(JSON.stringify(route.body), {
+          status: route.status,
+          headers: {
+            "content-type": "application/json",
+            ...(route.headers ?? {}),
+          },
+        });
+      },
+    );
+    return urls;
+  }
+
+  const readStarCursor = (): {
+    v?: number;
+    nextPage?: number | null;
+    sweepSeen?: string[];
+    completion?: string;
+  } | null => {
+    const row = db
+      .prepare("SELECT cursor FROM sync_states WHERE resource_kind = 'star'")
+      .get() as { cursor: string } | undefined;
+    return row ? JSON.parse(row.cursor) : null;
+  };
+
+  it("reports partial + resume point at the page cap, then resumes from that page", async () => {
+    const urls = stubPagedFetch((url) => {
+      if (!url.includes("/user/starred")) return { status: 200, body: [] };
+      const page = Number(new URL(url).searchParams.get("page") ?? "1");
+      return { status: 200, body: page >= 21 ? pageOf(21, 5) : pageOf(page) };
+    });
+
+    const first = await syncProvider("u1", "github");
+    expect(first.ok).toBe(true);
+    expect(first.completion).toBe("partial");
+    // 20 capped star pages + 1 fork page (empty, complete).
+    expect(first.pagesFetched).toBe(21);
+    expect(first.resume).toEqual([{ kind: "star", page: 21 }]);
+    const cursor1 = readStarCursor();
+    expect(cursor1?.v).toBe(2);
+    expect(cursor1?.nextPage).toBe(21);
+    expect(cursor1?.sweepSeen).toHaveLength(2000); // 20 pages × 100 distinct ids
+
+    urls.length = 0;
+    const second = await syncProvider("u1", "github");
+    expect(second.ok).toBe(true);
+    expect(second.completion).toBe("complete");
+    expect(second.resume).toEqual([]);
+    // The resumed run starts at page 21 instead of re-fetching from page 1.
+    expect(
+      urls.some((u) => u.includes("/user/starred") && u.includes("page=21")),
+    ).toBe(true);
+    expect(
+      urls.some((u) => u.includes("/user/starred") && u.includes("page=1&")),
+    ).toBe(false);
+    expect(readStarCursor()?.nextPage).toBeNull();
+  });
+
+  it("commits fetched pages and resumes at the failed page after a mid-run rate limit", async () => {
+    stubPagedFetch((url) => {
+      if (!url.includes("/user/starred")) return { status: 200, body: [] };
+      const page = Number(new URL(url).searchParams.get("page") ?? "1");
+      if (page === 1) return { status: 200, body: pageOf(1) };
+      return {
+        status: 429,
+        headers: { "x-ratelimit-remaining": "0" },
+        body: { message: "API rate limit exceeded" },
+      };
+    });
+
+    const result = await syncProvider("u1", "github");
+    expect(result.ok).toBe(true); // progress was committed
+    expect(result.completion).toBe("partial");
+    expect(result.code).toBe("RATE_LIMITED");
+    // 1 star page committed + 1 fork page (empty, complete).
+    expect(result.pagesFetched).toBe(2);
+    expect(result.resume).toEqual([{ kind: "star", page: 2 }]);
+    expect(count("repositories")).toBe(100);
+    expect(readStarCursor()?.nextPage).toBe(2);
+  });
+
+  it("starts a fresh sweep when the stored cursor is a legacy v1 shape", async () => {
+    const acct = (
+      db
+        .prepare(
+          "SELECT id FROM provider_accounts WHERE user_id='u1' AND provider_type='github'",
+        )
+        .get() as { id: string }
+    ).id;
+    db.prepare(
+      `INSERT INTO sync_states (id, user_id, provider_account_id, resource_kind, cursor, cursor_version, last_attempt_at, last_success_at)
+       VALUES ('s1','u1',?,'star','{"kind":"star","syncedAt":"2026-01-01T00:00:00Z"}',1,'2026-01-01','2026-01-01')`,
+    ).run(acct);
+
+    const urls = stubPagedFetch((url) =>
+      url.includes("/user/starred")
+        ? { status: 200, body: pageOf(1, 2) }
+        : { status: 200, body: [] },
+    );
+    const result = await syncProvider("u1", "github");
+    expect(result.completion).toBe("complete");
+    expect(
+      urls.some((u) => u.includes("/user/starred") && u.includes("page=1")),
+    ).toBe(true);
+  });
+
+  it("reaches complete across runs for a 2500-item library", async () => {
+    const totalPages = 25;
+    stubPagedFetch((url) => {
+      if (!url.includes("/user/starred")) return { status: 200, body: [] };
+      const page = Number(new URL(url).searchParams.get("page") ?? "1");
+      return {
+        status: 200,
+        body: page <= totalPages ? pageOf(page, 100) : [],
+      };
+    });
+
+    const first = await syncProvider("u1", "github");
+    expect(first.completion).toBe("partial");
+    expect(count("repositories")).toBe(2000);
+
+    const second = await syncProvider("u1", "github");
+    expect(second.completion).toBe("complete");
+    expect(count("repositories")).toBe(2500);
+    expect(count("saved_repositories")).toBe(2500);
   });
 });

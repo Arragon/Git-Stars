@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { getDb, inTransaction } from "../db.js";
 import { getProvider } from "../providers/registry.js";
 import { recordChange } from "./mutations.js";
+import { canViewRepository } from "./repository.js";
+import { generateBetween } from "../lib/fractionalIndex.js";
 import {
   LIST_FORMAT,
   LIST_SCHEMA_VERSION,
@@ -31,15 +33,17 @@ export function exportList(userId: string, listId: string): ListExport | null {
 
   const rows = db
     .prepare(
-      `SELECT sr.id AS saved_id, sr.note AS note, r.provider_type, r.host, r.remote_id, r.namespace_path, r.name, r.visibility
+      `SELECT sr.id AS saved_id, sr.note AS note, li.note AS item_note,
+              r.provider_type, r.host, r.remote_id, r.namespace_path, r.name, r.visibility
        FROM list_items li
        JOIN saved_repositories sr ON sr.id = li.saved_repository_id
        JOIN repositories r ON r.id = sr.repository_id
-       WHERE li.list_id = ? ORDER BY li.position ASC`,
+       WHERE li.list_id = ? ORDER BY li.position_key ASC, li.position ASC`,
     )
     .all(listId) as unknown as Array<{
     saved_id: string;
     note: string | null;
+    item_note: string | null;
     provider_type: string;
     host: string;
     remote_id: string;
@@ -72,6 +76,7 @@ export function exportList(userId: string, listId: string): ListExport | null {
       path: r.namespace_path ? `${r.namespace_path}/${r.name}` : r.name,
       visibility: r.visibility,
       note: r.note,
+      listNote: r.item_note,
       tags: tagMap.get(r.saved_id),
     })),
   );
@@ -112,18 +117,30 @@ export function importPreview(userId: string, text: string): ImportPreview {
     const host = item.source.host || defaultHost(item.source.provider);
     const repo = db
       .prepare(
-        "SELECT id FROM repositories WHERE provider_type = ? AND host = ? AND remote_id = ?",
+        `SELECT id, visibility, provider_type, host FROM repositories
+         WHERE provider_type = ? AND host = ? AND remote_id = ?`,
       )
       .get(item.source.provider, host, item.source.remote_id) as unknown as
-      { id: string } | undefined;
+      | {
+          id: string;
+          visibility: string | null;
+          provider_type: string;
+          host: string;
+        }
+      | undefined;
     let status: ImportItemStatus;
     if (repo) {
-      const saved = db
-        .prepare(
-          "SELECT id FROM saved_repositories WHERE user_id = ? AND repository_id = ? AND deleted_at IS NULL",
-        )
-        .get(userId, repo.id);
-      status = saved ? "existing" : "new";
+      if (!canViewRepository(userId, repo)) {
+        // Import must not become a second self-authorization path (M7-07).
+        status = "unresolved";
+      } else {
+        const saved = db
+          .prepare(
+            "SELECT id FROM saved_repositories WHERE user_id = ? AND repository_id = ? AND deleted_at IS NULL",
+          )
+          .get(userId, repo.id);
+        status = saved ? "existing" : "new";
+      }
     } else {
       status = getProvider(item.source.provider) ? "new" : "unresolved";
     }
@@ -214,6 +231,13 @@ export function importCommit(
       )
       .get(listId) as unknown as { m: number };
     let position = Number(maxPos.m) + 1;
+    // Imported items must sort AFTER existing ones: position_key is the read ordering.
+    const maxKey = db
+      .prepare(
+        "SELECT position_key FROM list_items WHERE list_id = ? ORDER BY position_key DESC LIMIT 1",
+      )
+      .get(listId) as unknown as { position_key: string } | undefined;
+    let lastKey = maxKey?.position_key ?? "";
 
     for (const item of doc.items) {
       const provider = item.source.provider;
@@ -226,12 +250,25 @@ export function importCommit(
 
       const existingRepo = db
         .prepare(
-          "SELECT id FROM repositories WHERE provider_type = ? AND host = ? AND remote_id = ?",
+          `SELECT id, visibility, provider_type, host FROM repositories
+           WHERE provider_type = ? AND host = ? AND remote_id = ?`,
         )
         .get(provider, host, item.source.remote_id) as unknown as
-        { id: string } | undefined;
+        | {
+            id: string;
+            visibility: string | null;
+            provider_type: string;
+            host: string;
+          }
+        | undefined;
       let repositoryId: string;
       if (existingRepo) {
+        // A known local row is not proof of access: skip items the importer may not see
+        // instead of creating a Saved row that would unlock private metadata (M7-07).
+        if (!canViewRepository(userId, existingRepo)) {
+          counts.unresolved += 1;
+          continue;
+        }
         repositoryId = existingRepo.id;
       } else {
         repositoryId = randomUUID();
@@ -294,12 +331,30 @@ export function importCommit(
         .get(listId, savedId) as unknown as { id: string } | undefined;
       if (!existingItem) {
         const itemId = randomUUID();
+        const positionKey = generateBetween(lastKey || null, null);
+        lastKey = positionKey;
         db.prepare(
-          `INSERT INTO list_items (id, list_id, saved_repository_id, position, version, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 1, ?, ?)`,
-        ).run(itemId, listId, savedId, position, nowIso, nowIso);
+          `INSERT INTO list_items
+             (id, list_id, saved_repository_id, position, position_key, note, version, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+        ).run(
+          itemId,
+          listId,
+          savedId,
+          position,
+          positionKey,
+          item.listNote ?? null,
+          nowIso,
+          nowIso,
+        );
         position += 1;
         recordChange(userId, "list_item", itemId, "created", 1);
+      } else if (item.listNote !== undefined) {
+        // Repeated import: keep both note kinds, never silently drop the list note.
+        db.prepare(
+          "UPDATE list_items SET note = ?, version = version + 1, updated_at = ? WHERE id = ?",
+        ).run(item.listNote ?? null, nowIso, existingItem.id);
+        recordChange(userId, "list_item", existingItem.id, "updated", 1);
       }
     }
   });

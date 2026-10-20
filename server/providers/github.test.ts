@@ -213,6 +213,75 @@ describe("github adapter error classification", () => {
   });
 });
 
+describe("github fork contract (M7-06)", () => {
+  it("keeps only genuine forks from a mixed owned-repo page", async () => {
+    stubFetch([["/user/repos", { status: 200, body: fixtures.forksMixed }]]);
+    const page = await githubProvider.listMemberships(ctx, "fork");
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0].identity.remoteId).toBe("301");
+    expect(page.items[0].kind).toBe("fork");
+    expect(page.items[0].snapshot?.visibility).toBe("public");
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it("queries owned repos with affiliation=owner and never uses the invalid type=forks", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      urls.push(typeof input === "string" ? input : input.toString());
+      return new Response(JSON.stringify(fixtures.forksEmpty), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    await githubProvider.listMemberships(ctx, "fork");
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("/user/repos");
+    expect(urls[0]).toContain("affiliation=owner");
+    expect(urls[0]).not.toContain("type=forks");
+  });
+
+  it("uses the public user endpoint anonymously and rejects a missing username", async () => {
+    stubFetch([
+      ["/users/alice/repos", { status: 200, body: fixtures.forksLastPage }],
+    ]);
+    const page = await githubProvider.listMemberships(
+      { providerType: "github", host: "github.com", remoteUsername: "alice" },
+      "fork",
+    );
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0].identity.remoteId).toBe("303");
+
+    await expect(
+      githubProvider.listMemberships(
+        { providerType: "github", host: "github.com" },
+        "fork",
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+  });
+
+  it("keeps the cursor open when the RAW page is full even if few entries are forks", async () => {
+    const fullPage = Array.from({ length: 100 }, (_, i) => ({
+      id: 400 + i,
+      name: `repo-${i}`,
+      full_name: `alice/repo-${i}`,
+      description: null,
+      language: null,
+      stargazers_count: 0,
+      forks_count: 0,
+      html_url: `https://github.com/alice/repo-${i}`,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      private: false,
+      fork: i === 0,
+      owner: { login: "alice" },
+    }));
+    stubFetch([["/user/repos", { status: 200, body: fullPage }]]);
+    const page = await githubProvider.listMemberships(ctx, "fork");
+    expect(page.items).toHaveLength(1);
+    expect(page.nextCursor).toBe("2");
+  });
+});
+
 describe("stub providers fail closed (ADR-0002 D4)", () => {
   it("gitlab fetchRepository throws NOT_IMPLEMENTED", async () => {
     await expect(

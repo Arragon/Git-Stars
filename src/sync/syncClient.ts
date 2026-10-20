@@ -8,6 +8,7 @@ import { createMutationQueue } from "./mutationQueue";
 import { createConflictLog } from "./conflictLog";
 import { createPushReplay } from "./pushReplay";
 import { createPullSync } from "./pullSync";
+import { createIdResolver } from "./idMap";
 import { getChanges } from "../utils/gitstarsApi";
 import { apiPut, apiPost, apiDelete } from "../utils/api";
 import type { MutationResponse } from "./pushReplay";
@@ -16,6 +17,7 @@ import type { MutationResponse } from "./pushReplay";
 
 export const mutationQueue = createMutationQueue(localStore);
 export const conflictLog = createConflictLog(localStore);
+export const syncIdResolver = createIdResolver(localStore);
 
 // Full etag form expected by the server's If-Match parser (ADR-0004 D2).
 export function buildIfMatch(entityId: string, version: number): string {
@@ -46,7 +48,7 @@ const syncApiClient = {
             version: number;
             etag: string;
           }>("/api/library", payload, { headers });
-          return { version: res.version, etag: res.etag };
+          return { version: res.version, etag: res.etag, id: res.id };
         }
         if (m.operation === "delete") {
           await apiDelete(`/api/library/${m.entityId}`);
@@ -68,7 +70,7 @@ const syncApiClient = {
             version: number;
             etag: string;
           }>("/api/lists", payload, { headers });
-          return { version: res.version, etag: res.etag };
+          return { version: res.version, etag: res.etag, id: res.id };
         }
         if (m.operation === "delete") {
           await apiDelete(`/api/lists/${m.entityId}`);
@@ -109,6 +111,15 @@ const syncApiClient = {
           );
           return { version: 1, etag: "" };
         }
+        // update: a note edit takes precedence over the reorder fallback (M7-12).
+        if (typeof payload.note === "string" && savedId) {
+          await apiPut(
+            `/api/lists/${listId}/items`,
+            { notes: [{ savedRepositoryId: savedId, note: payload.note }] },
+            { headers },
+          );
+          return { version: m.baseVersion + 1, etag: "" };
+        }
         // update: reorder op (fractional indexing is server-side).
         if (savedId) {
           await apiPut<{ version: number; etag: string }>(
@@ -127,7 +138,11 @@ const syncApiClient = {
             version: number;
             etag: string;
           }>("/api/tags", payload, { headers });
-          return { version: res.version ?? 1, etag: res.etag ?? "" };
+          return {
+            version: res.version ?? 1,
+            etag: res.etag ?? "",
+            id: res.id,
+          };
         }
         if (m.operation === "delete") {
           await apiDelete(`/api/tags/${m.entityId}`);
@@ -174,6 +189,7 @@ export const pushReplay = createPushReplay({
   mutationQueue,
   apiClient: syncApiClient,
   conflictLog,
+  idResolver: syncIdResolver,
 });
 
 // --- Pull sync ---

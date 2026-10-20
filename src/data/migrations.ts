@@ -99,6 +99,17 @@ export const CLIENT_MIGRATIONS: ClientMigration[] = [
       cl.createIndex("entityType", "entityType", { unique: false });
     },
   },
+  {
+    version: 4,
+    description:
+      "Add idMap store for offline temp-id -> server-id resolution (M7-04 / INH-1702)",
+    up(db: IDBDatabase) {
+      const map = db.createObjectStore("idMap" as StoreName, {
+        keyPath: "tempId",
+      });
+      map.createIndex("entity", "entity", { unique: false });
+    },
+  },
 ];
 
 /** Latest schema version after all migrations are applied. */

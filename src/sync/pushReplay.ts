@@ -3,13 +3,23 @@
 // Replays pending mutations from the queue to the server in order.
 // Enhanced with conflict resolution (INH-419).
 
-import type { QueuedMutation } from "../data/types";
+import type { IdMapEntry, QueuedMutation } from "../data/types";
 import type { MutationQueue } from "./mutationQueue";
 import type { ConflictLog } from "./conflictLog";
 import { ApiError } from "../utils/api";
 import { resolveConflict } from "./conflictResolvers";
+import { rewritePayloadWithIds, type IdResolver } from "./idMap";
 
 export type PushStatus = "idle" | "pushing" | "paused" | "error";
+
+export type PushOutcome =
+  | "completed"
+  | "failed"
+  | "quarantined"
+  | "paused"
+  | "stopped"
+  /** Waiting for a referenced temp id to be ACKed; leave pending, keep processing. */
+  | "blocked";
 
 export interface PushResult {
   completed: number;
@@ -22,6 +32,8 @@ export interface MutationResponse {
   version: number;
   etag: string;
   current?: unknown; // Server current state for conflict resolution
+  /** Authoritative id returned by a create (M7-04 temp-id mapping). */
+  id?: string;
 }
 
 export interface ApiClient {
@@ -32,6 +44,8 @@ export interface PushReplayConfig {
   mutationQueue: MutationQueue;
   apiClient: ApiClient;
   conflictLog?: ConflictLog;
+  /** Resolves/records offline temp ids (M7-04). Without it, refs are sent as-is. */
+  idResolver?: IdResolver;
   onStatusChange?: (status: PushStatus) => void;
 }
 
@@ -78,8 +92,28 @@ function coalescePreferences(mutations: QueuedMutation[]): QueuedMutation[] {
 
 // --- Push replay implementation ---
 
+/**
+ * 409 payloads may be `{current: {...}, etag}` (current server contract) or a legacy
+ * `"<id>:<version>"` string. Normalize to an object so resolvers never spread a string
+ * into a garbage payload (M7-14 root cause).
+ */
+function normalizeConflictCurrent(details: unknown): Record<string, unknown> {
+  if (!details) return {};
+  const raw =
+    typeof details === "object" && details !== null && "current" in details
+      ? (details as { current?: unknown }).current
+      : details;
+  if (raw && typeof raw === "object") return raw as Record<string, unknown>;
+  if (typeof raw === "string") {
+    const match = /:(\d+)$/.exec(raw);
+    return { version: match ? Number(match[1]) : 0 };
+  }
+  return {};
+}
+
 export function createPushReplay(config: PushReplayConfig): PushReplay {
-  const { mutationQueue, apiClient, conflictLog, onStatusChange } = config;
+  const { mutationQueue, apiClient, conflictLog, idResolver, onStatusChange } =
+    config;
 
   let paused = false;
   let _retryAfterMs = 0;
@@ -90,9 +124,40 @@ export function createPushReplay(config: PushReplayConfig): PushReplay {
 
   async function processMutation(
     mutation: QueuedMutation,
-  ): Promise<"completed" | "failed" | "quarantined" | "paused" | "stopped"> {
+  ): Promise<PushOutcome> {
+    // 1. Resolve temp ids referenced by the payload (M7-04). A dependent mutation stays
+    // pending until its create is ACKed; unrelated queue items keep flowing.
+    let outgoing = mutation;
+    if (mutation.refs && mutation.refs.length > 0) {
+      if (!idResolver) return "blocked";
+      const resolved = await idResolver.resolveRefs(mutation.refs);
+      // Only temp ids can block; a real id is already authoritative.
+      const unresolved = mutation.refs.filter(
+        (ref) => ref.startsWith("pending:") && !resolved.has(ref),
+      );
+      if (unresolved.length > 0) return "blocked";
+      outgoing = {
+        ...mutation,
+        payload: rewritePayloadWithIds(mutation.payload, resolved),
+      };
+    }
+
     try {
-      await apiClient.sendMutation(mutation);
+      const response = await apiClient.sendMutation(outgoing);
+      // 2. Persist the authoritative id produced by a create BEFORE dropping the queue
+      // entry, so a crash between the two steps replays idempotently instead of losing
+      // the mapping (M7-04).
+      if (mutation.createsTempId && response.id) {
+        const entry: IdMapEntry = {
+          tempId: mutation.createsTempId,
+          entity: mutation.entity,
+          serverId: response.id,
+          version: Number(response.version ?? 1),
+          etag: response.etag,
+          createdAt: new Date().toISOString(),
+        };
+        await idResolver?.record(entry);
+      }
       await mutationQueue.complete(mutation.id);
       return "completed";
     } catch (err) {
@@ -106,6 +171,15 @@ export function createPushReplay(config: PushReplayConfig): PushReplay {
             );
             return "quarantined";
 
+          case 404:
+            // Target entity no longer exists (e.g. a permanently failed dependency).
+            // Quarantine instead of blocking the whole queue behind it (M7-04).
+            await mutationQueue.quarantine(
+              mutation.id,
+              `Not found: ${err.message}`,
+            );
+            return "quarantined";
+
           case 401:
           case 403:
             // Session expired → pause, preserve queue.
@@ -115,10 +189,7 @@ export function createPushReplay(config: PushReplayConfig): PushReplay {
 
           case 409: {
             // Version conflict — attempt auto-resolution via conflict resolvers (INH-419).
-            const serverCurrent = err.details
-              ? ((err.details as Record<string, unknown>).current ??
-                err.details)
-              : {};
+            const serverCurrent = normalizeConflictCurrent(err.details);
 
             // Record conflict for audit/UI.
             const conflictId = await conflictLog?.record({
@@ -257,6 +328,9 @@ export function createPushReplay(config: PushReplayConfig): PushReplay {
         case "quarantined":
           result.quarantined++;
           break;
+        case "blocked":
+          // Dependency not ACKed yet — leave pending, keep unrelated items flowing.
+          break;
         case "paused":
         case "stopped":
           // Stop processing; queue preserved.
@@ -305,7 +379,9 @@ export function createPushReplay(config: PushReplayConfig): PushReplay {
       remaining,
     };
 
-    setStatus(remaining === 0 ? "idle" : "error");
+    setStatus(
+      outcome === "blocked" ? "idle" : remaining === 0 ? "idle" : "error",
+    );
     return result;
   }
 

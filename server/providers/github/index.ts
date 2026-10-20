@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   dedupe,
   httpBytes,
@@ -28,8 +29,16 @@ const MAX_FILE_BYTES = 512 * 1024; // decode text files up to 512 KB; larger is 
 
 // remoteId -> "owner/repo". GitHub sub-resource endpoints need the full name; resolving it
 // from the stable numeric id costs one call, cached here.
+// The cache key carries a credential fingerprint: resolving a private repo with A's token
+// must never be served to B (M7-07 cross-user bleed).
 // ponytail: no TTL; a remote rename could stale this until process restart. Re-resolve on 404 if that bites.
 const fullNameCache = new Map<string, string>();
+
+function credentialScope(ctx: ProviderConnectionContext): string {
+  return ctx.token
+    ? createHash("sha256").update(ctx.token).digest("hex").slice(0, 16)
+    : "anonymous";
+}
 
 interface GhRepo {
   id: number;
@@ -131,7 +140,8 @@ async function resolveFullName(
   identity: RepositoryIdentity,
   ctx: ProviderConnectionContext,
 ): Promise<string> {
-  const cached = fullNameCache.get(identity.remoteId);
+  const key = `${credentialScope(ctx)}:${identity.remoteId}`;
+  const cached = fullNameCache.get(key);
   if (cached) return cached;
   const res = await httpJson(`${API}/repositories/${identity.remoteId}`, {
     token: ctx.token,
@@ -142,7 +152,7 @@ async function resolveFullName(
     throw new ProviderError("NOT_FOUND", "Repository full name unavailable", {
       status: 404,
     });
-  fullNameCache.set(identity.remoteId, repo.full_name);
+  fullNameCache.set(key, repo.full_name);
   return repo.full_name;
 }
 
@@ -167,10 +177,12 @@ export const githubProvider: RepositoryProvider = {
   } as ProviderCapabilities,
 
   async fetchRepository(identity, ctx) {
-    const res = await dedupe(`gh:repo:${identity.remoteId}`, () =>
-      httpJson(`${API}/repositories/${identity.remoteId}`, {
-        token: ctx.token,
-      }),
+    const res = await dedupe(
+      `gh:repo:${credentialScope(ctx)}:${identity.remoteId}`,
+      () =>
+        httpJson(`${API}/repositories/${identity.remoteId}`, {
+          token: ctx.token,
+        }),
     );
     assertOk(res, "Repository");
     return normalize(res.data as GhRepo);
@@ -187,36 +199,51 @@ export const githubProvider: RepositoryProvider = {
         "Listing memberships requires a token or a username",
       );
     }
-    const url =
-      kind === "star"
-        ? ctx.token
-          ? `${API}/user/starred?per_page=${PER_PAGE}&page=${page}`
-          : `${API}/users/${username}/starred?per_page=${PER_PAGE}&page=${page}`
-        : `${API}/users/${username}/repos?type=forks&per_page=${PER_PAGE}&page=${page}`;
-    const accept =
-      kind === "star"
-        ? "application/vnd.github.v3.star+json"
-        : "application/vnd.github+json";
+    // GitHub has no "list the forks I own" resource: forks owned by a user are ordinary
+    // repositories carrying `fork: true`. Listing all owned repos and filtering by that
+    // flag is the only contract-correct query. `affiliation=owner` (token path) and
+    // `type=owner` (anonymous path) keep collaborator/org-member repos out.
+    // `type=forks` is not a valid GitHub value — it used to silently return every repo.
+    const isStar = kind === "star";
+    const url = isStar
+      ? ctx.token
+        ? `${API}/user/starred?per_page=${PER_PAGE}&page=${page}`
+        : `${API}/users/${username}/starred?per_page=${PER_PAGE}&page=${page}`
+      : ctx.token
+        ? `${API}/user/repos?type=owner&affiliation=owner&sort=updated&per_page=${PER_PAGE}&page=${page}`
+        : `${API}/users/${username}/repos?type=owner&sort=updated&per_page=${PER_PAGE}&page=${page}`;
+    const accept = isStar
+      ? "application/vnd.github.v3.star+json"
+      : "application/vnd.github+json";
     const res = await httpJson(url, { token: ctx.token, accept });
-    assertOk(res, kind === "star" ? "Stars" : "Forks");
+    assertOk(res, isStar ? "Stars" : "Forks");
     const raw = Array.isArray(res.data) ? res.data : [];
 
-    const items = raw.map((entry) => {
+    // Only genuine forks become `fork` memberships; a mixed page must not turn every
+    // owned repository into a fork. Pagination is decided from the RAW page length so a
+    // filtered page does not terminate the cursor early.
+    const entries = isStar
+      ? raw
+      : raw.filter((entry) => (entry as GhRepo).fork === true);
+
+    const items = entries.map((entry) => {
       const repo = (
-        kind === "star" ? (entry as { repo: GhRepo }).repo : entry
+        isStar ? (entry as { repo: GhRepo }).repo : entry
       ) as GhRepo;
-      const starredAt =
-        kind === "star"
-          ? ((entry as { starred_at?: string }).starred_at ?? null)
-          : (repo.created_at ?? null);
+      // Known trade-off: for forks GitHub does not expose "forked at" on the repo
+      // object, so the repo creation time is the best cheap approximation (avoids an
+      // extra request per fork).
+      const createdAt = isStar
+        ? ((entry as { starred_at?: string }).starred_at ?? null)
+        : (repo.created_at ?? null);
       return {
         identity: identityOf(repo),
         kind,
-        remoteCreatedAt: starredAt,
+        remoteCreatedAt: createdAt,
         snapshot: normalize(repo),
       };
     });
-    const nextCursor = items.length === PER_PAGE ? String(page + 1) : null;
+    const nextCursor = raw.length === PER_PAGE ? String(page + 1) : null;
     return { items, nextCursor } satisfies MembershipPage;
   },
 

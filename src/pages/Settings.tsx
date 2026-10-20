@@ -30,7 +30,10 @@ import {
   type ProviderAccount,
 } from "../utils/gitstarsApi";
 import { ApiError } from "../utils/api";
-import { signOutAndResetLocal } from "../utils/session";
+import {
+  confirmUnsyncedBeforeSignOut,
+  signOutAndResetLocal,
+} from "../utils/session";
 import { useTheme, type ThemePreference } from "../hooks/useTheme";
 import { useAuthStore } from "../store/useAuthStore";
 import { useAiConfigStore } from "../store/useAiConfigStore";
@@ -539,9 +542,16 @@ const ProvidersSection: React.FC = () => {
     setError("");
     try {
       const res = await syncProvider("github");
-      showToast(
-        res.counts ? `同步完成：${res.counts.repositories} 个仓库` : "同步完成",
-      );
+      const repos = res.counts?.repositories ?? 0;
+      if (res.completion === "partial") {
+        // M7-05: a bounded run reports partial honestly; pressing sync again resumes
+        // from the stored page cursor instead of silently claiming completion.
+        showToast(
+          `同步未完成：本次 ${res.pagesFetched ?? 0} 页 / ${repos} 个仓库，再次点击可继续`,
+        );
+      } else {
+        showToast(res.counts ? `同步完成：${repos} 个仓库` : "同步完成");
+      }
     } catch (e) {
       setError(msg(e));
     } finally {
@@ -762,8 +772,8 @@ const AccountSection: React.FC = () => {
     setDeleteError("");
     try {
       await confirmAccountDeletion(token);
-      // Account gone server-side: wipe local caches and return to the entry page.
-      await signOutAndResetLocal();
+      // Account gone server-side: nothing is left to replay — wipe everything.
+      await signOutAndResetLocal({ preserveQueue: false });
       setUser(null);
       navigate("/");
     } catch (e) {
@@ -774,17 +784,7 @@ const AccountSection: React.FC = () => {
   };
 
   const onSignOut = async () => {
-    const pending = pendingMutationCount;
-    if (
-      pending > 0 &&
-      !window.confirm(
-        `本地还有 ${pending} 条未同步的修改，退出前建议先导出数据。确定退出登录？`,
-      )
-    ) {
-      return;
-    } else if (pending === 0 && !window.confirm("确定退出登录？")) {
-      return;
-    }
+    if (!(await confirmUnsyncedBeforeSignOut())) return;
     await signOutAndResetLocal();
     setUser(null);
     navigate("/");

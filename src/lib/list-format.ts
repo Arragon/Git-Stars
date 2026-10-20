@@ -1,9 +1,12 @@
 // Portable GitStars List format (INH-384, ARCHITECTURE.md 22-27, ADR-0001 D3).
 // Isomorphic and framework-free: imported by both the client (preview) and the server
-// (export/import engine). schema_version 0 (draft) until GitHub+GitLab round-trip is proven.
+// (export/import engine). v1 carries both note kinds and remains backward compatible
+// with v0 files (M7-12).
 
 export const LIST_FORMAT = "gitstars-list";
-export const LIST_SCHEMA_VERSION = 0;
+// v1 adds the second note kind (`listNote`) — M7-12 / INH-1707. v0 files stay importable.
+export const LIST_SCHEMA_VERSION = 1;
+export const SUPPORTED_LIST_SCHEMA_VERSIONS = [0, 1] as const;
 
 const MAX_ITEMS = 20000;
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -30,7 +33,10 @@ export interface ListItemSource {
 
 export interface ListExportItem {
   source: ListItemSource;
+  /** Repository-level note (saved_repositories.note). */
   note?: string;
+  /** Per-list usage note (list_items.note) — the second note kind, added in v1. */
+  listNote?: string;
   tags?: string[];
 }
 
@@ -57,8 +63,15 @@ export function validateListExport(input: unknown): ValidationResult {
 
   if (doc.format !== LIST_FORMAT)
     errors.push(`format must be "${LIST_FORMAT}"`);
-  if (doc.schema_version !== LIST_SCHEMA_VERSION)
-    errors.push(`unsupported schema_version (expected ${LIST_SCHEMA_VERSION})`);
+  if (
+    !SUPPORTED_LIST_SCHEMA_VERSIONS.includes(
+      doc.schema_version as (typeof SUPPORTED_LIST_SCHEMA_VERSIONS)[number],
+    )
+  ) {
+    errors.push(
+      `unsupported schema_version (expected one of ${SUPPORTED_LIST_SCHEMA_VERSIONS.join(", ")})`,
+    );
+  }
   if (typeof doc.title !== "string" || !doc.title.trim())
     errors.push("title is required");
   if (doc.description !== undefined && typeof doc.description !== "string")
@@ -90,6 +103,8 @@ export function validateListExport(input: unknown): ValidationResult {
       errors.push(`item[${i}].source.host must be a string`);
     if (item.note !== undefined && typeof item.note !== "string")
       errors.push(`item[${i}].note must be a string`);
+    if (item.listNote !== undefined && typeof item.listNote !== "string")
+      errors.push(`item[${i}].listNote must be a string`);
     if (
       item.tags !== undefined &&
       (!Array.isArray(item.tags) ||
@@ -112,6 +127,7 @@ export interface SanitizeInput {
   path?: string;
   visibility?: string | null;
   note?: string | null;
+  listNote?: string | null;
   tags?: string[];
 }
 
@@ -130,6 +146,7 @@ export function sanitizeItems(items: SanitizeInput[]): ListExportItem[] {
       },
     };
     if (it.note) item.note = it.note;
+    if (it.listNote) item.listNote = it.listNote;
     if (it.tags && it.tags.length > 0) item.tags = it.tags;
     out.push(item);
   }

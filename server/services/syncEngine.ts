@@ -13,19 +13,26 @@ import { loadContext, upsertRepositoryFromSnapshot } from "./repository.js";
 //
 // Invariants enforced here:
 //  - idempotent: repeated runs converge, no duplicate rows;
-//  - partial failure never advances the cursor (writes are transactional; fetch is not);
+//  - a run that fetched nothing before failing writes nothing and keeps the cursor;
+//  - a run that stopped early (page cap / rate limit / network) commits the pages it
+//    fetched, reports `completion: "partial"` and stores a resumable page cursor;
+//  - remote removal is reconciled only after a sweep that covered the whole source;
 //  - remote removal deactivates the membership but NEVER deletes the SavedRepository.
-//
-// ponytail: bounded full reconcile (MAX_PAGES per kind). Add true incremental cursors per
-// provider when libraries outgrow the cap.
 
-const MAX_PAGES = 20;
+const MAX_PAGES_PER_RUN = 20;
+
+export type SyncCompletion = "complete" | "partial" | "failed" | "paused";
 
 export interface SyncCounts {
   repositories: number;
   membershipsActive: number;
   savedCreated: number;
   deactivated: number;
+}
+
+export interface SyncResumePoint {
+  kind: MembershipKind;
+  page: number;
 }
 
 export interface SyncOutcome {
@@ -37,6 +44,10 @@ export interface SyncOutcome {
   code?: string;
   message?: string;
   resetAt?: number;
+  /** "complete" only when the source was exhausted; "partial" carries resume points. */
+  completion: SyncCompletion;
+  pagesFetched: number;
+  resume: SyncResumePoint[];
   // Normalized data, returned so callers can mirror to the legacy schema during migration.
   repos: RepositorySnapshot[];
   memberships: Array<{
@@ -45,6 +56,59 @@ export interface SyncOutcome {
     kind: MembershipKind;
     remoteCreatedAt: string | null;
   }>;
+}
+
+interface SyncCursor {
+  /** Next page to fetch (2-based); null means "start a fresh sweep at page 1". */
+  nextPage: number | null;
+  /** Remote ids already observed in the in-progress sweep (survives across runs). */
+  sweepSeen: string[];
+}
+
+function readCursor(
+  userId: string,
+  accountId: string | null,
+  kind: MembershipKind,
+): SyncCursor {
+  const row = getDb()
+    .prepare(
+      `SELECT cursor FROM sync_states
+       WHERE user_id = ? AND COALESCE(provider_account_id,'') = COALESCE(?,'') AND resource_kind = ?`,
+    )
+    .get(userId, accountId, kind) as unknown as { cursor: string } | undefined;
+  if (!row?.cursor) return { nextPage: null, sweepSeen: [] };
+  try {
+    const parsed = JSON.parse(row.cursor) as {
+      v?: number;
+      kind?: string;
+      nextPage?: unknown;
+      sweepSeen?: unknown;
+    };
+    // Legacy v1 cursors (`{kind, syncedAt}`) cannot be resumed — start a fresh sweep.
+    if (parsed?.v !== 2 || parsed.kind !== kind)
+      return { nextPage: null, sweepSeen: [] };
+    const nextPage =
+      typeof parsed.nextPage === "number" && parsed.nextPage >= 2
+        ? Math.floor(parsed.nextPage)
+        : null;
+    const sweepSeen = Array.isArray(parsed.sweepSeen)
+      ? parsed.sweepSeen.filter((id): id is string => typeof id === "string")
+      : [];
+    return { nextPage, sweepSeen };
+  } catch {
+    return { nextPage: null, sweepSeen: [] };
+  }
+}
+
+function classifyFailure(error: unknown): {
+  code: string;
+  message: string;
+  resetAt?: number;
+} {
+  if (error instanceof ProviderError) {
+    return { code: error.code, message: error.message, resetAt: error.resetAt };
+  }
+  return { code: "SYNC_FAILED", message: "Unexpected sync error" };
 }
 
 export async function syncProvider(
@@ -56,6 +120,9 @@ export async function syncProvider(
     ok: false,
     provider: providerType,
     startedAt,
+    completion: "failed",
+    pagesFetched: 0,
+    resume: [],
     repos: [],
     memberships: [],
   };
@@ -87,38 +154,73 @@ export async function syncProvider(
   };
   const outRepos: RepositorySnapshot[] = [];
   const outMemberships: SyncOutcome["memberships"] = [];
+  const resume: SyncResumePoint[] = [];
+  let pagesFetched = 0;
+  let completion: SyncCompletion = "complete";
+  let failure: { code: string; message: string; resetAt?: number } | null =
+    null;
 
   try {
     for (const kind of provider.capabilities.memberships) {
-      // 1. Fetch all pages OUTSIDE the transaction (network is not transactional).
+      const cursor = readCursor(userId, accountId, kind);
+      const startPage = cursor.nextPage ?? 1;
+      const sweepSeen = new Set<string>(cursor.sweepSeen);
+
+      // 1. Fetch pages OUTSIDE the transaction (network is not transactional).
       const fetched: Array<{
         snapshot: RepositorySnapshot;
         kind: MembershipKind;
         remoteCreatedAt: string | null;
       }> = [];
-      let cursor: string | null = null;
-      let truncated = false;
-      for (let page = 0; page < MAX_PAGES; page++) {
-        const result = await provider.listMemberships(ctx, kind, cursor);
-        for (const item of result.items) {
-          if (item.snapshot)
-            fetched.push({
-              snapshot: item.snapshot as RepositorySnapshot,
-              kind,
-              remoteCreatedAt: item.remoteCreatedAt,
-            });
+      let page = startPage;
+      let pagesThisKind = 0;
+      let exhausted = false;
+
+      while (pagesThisKind < MAX_PAGES_PER_RUN) {
+        let result;
+        try {
+          result = await provider.listMemberships(
+            ctx,
+            kind,
+            page === 1 ? null : String(page),
+          );
+        } catch (error) {
+          // Nothing fetched at all in this run -> hard failure (no write, no cursor move).
+          if (pagesFetched === 0 && fetched.length === 0) throw error;
+          // Partial progress: keep what we have and remember where to resume.
+          failure = classifyFailure(error);
+          completion = "partial";
+          break;
         }
-        cursor = result.nextCursor ?? null;
-        if (!cursor) break;
-        if (page === MAX_PAGES - 1) truncated = true; // stopped at the cap with more pages remaining
+        pagesThisKind += 1;
+        pagesFetched += 1;
+        for (const item of result.items) {
+          if (!item.snapshot) continue;
+          fetched.push({
+            snapshot: item.snapshot as RepositorySnapshot,
+            kind,
+            remoteCreatedAt: item.remoteCreatedAt,
+          });
+          sweepSeen.add(item.snapshot.identity.remoteId);
+        }
+        if (!result.nextCursor) {
+          exhausted = true;
+          break;
+        }
+        page += 1;
       }
 
-      // 2. Write inside one transaction; the cursor/state advances only if this commits.
+      const sweptSource = exhausted;
+      const nextPage = sweptSource ? null : page;
+      if (!sweptSource) completion = "partial";
+      if (nextPage !== null) resume.push({ kind, page: nextPage });
+
+      // 2. Write inside one transaction; the cursor advances only if this commits.
       inTransaction(() => {
-        const seenRepoIds = new Set<string>();
+        const seenRemoteIds = new Set<string>();
         for (const item of fetched) {
           const repositoryId = upsertRepositoryFromSnapshot(item.snapshot);
-          seenRepoIds.add(repositoryId);
+          seenRemoteIds.add(item.snapshot.identity.remoteId);
           counts.repositories += 1;
           outRepos.push(item.snapshot);
           outMemberships.push({
@@ -178,21 +280,25 @@ export async function syncProvider(
           }
         }
 
-        // 3. Full reconcile: deactivate active memberships of this kind not seen this run.
-        // Skip when the fetch was truncated at MAX_PAGES: we did not observe the complete remote
-        // set, so absence is NOT evidence of removal (prevents mass false-deactivation of large libraries).
-        if (!truncated) {
+        // 3. Reconcile only after a sweep that started at page 1 and exhausted the source.
+        // A resumed run that only fetched the tail marks `complete` but leaves the
+        // deactivation pass to the next full sweep: absence is only evidence of removal
+        // when the whole remote set was observed by this sweep.
+        if (sweptSource && startPage === 1) {
           const active = db
             .prepare(
-              `SELECT id, repository_id FROM remote_memberships
-               WHERE user_id = ? AND kind = ? AND active = 1 AND COALESCE(provider_account_id,'') = COALESCE(?,'')`,
+              `SELECT rm.id AS id, r.remote_id AS remote_id
+               FROM remote_memberships rm
+               JOIN repositories r ON r.id = rm.repository_id
+               WHERE rm.user_id = ? AND rm.kind = ? AND rm.active = 1
+                 AND COALESCE(rm.provider_account_id,'') = COALESCE(?,'')`,
             )
             .all(userId, kind, accountId) as unknown as Array<{
             id: string;
-            repository_id: string;
+            remote_id: string;
           }>;
           for (const membership of active) {
-            if (!seenRepoIds.has(membership.repository_id)) {
+            if (!seenRemoteIds.has(membership.remote_id)) {
               db.prepare(
                 "UPDATE remote_memberships SET active = 0 WHERE id = ?",
               ).run(membership.id);
@@ -201,7 +307,7 @@ export async function syncProvider(
           }
         }
 
-        // 4. Advance the per-resource cursor only after a successful write.
+        // 4. Persist a versioned, resumable cursor after a successful write.
         const nowIso = new Date().toISOString();
         const stateRow = db
           .prepare(
@@ -210,18 +316,52 @@ export async function syncProvider(
           )
           .get(userId, accountId, kind) as unknown as
           { id: string } | undefined;
-        const cursorJson = JSON.stringify({ kind, syncedAt: nowIso });
+        const cursorJson = JSON.stringify({
+          v: 2,
+          kind,
+          nextPage,
+          // Keep the sweep accumulator only while a sweep is still in progress.
+          sweepSeen: nextPage === null ? [] : [...sweepSeen],
+          completion: sweptSource ? "complete" : "partial",
+          pagesFetched: pagesThisKind,
+          syncedAt: nowIso,
+        });
+        const reconciled = sweptSource && startPage === 1;
         if (stateRow) {
-          db.prepare(
-            `UPDATE sync_states SET cursor = ?, cursor_version = cursor_version + 1, last_attempt_at = ?,
-               last_success_at = ?, last_full_reconcile_at = ?, last_error_code = NULL, last_error_message = NULL
-             WHERE id = ?`,
-          ).run(cursorJson, nowIso, nowIso, nowIso, stateRow.id);
+          if (sweptSource) {
+            db.prepare(
+              `UPDATE sync_states SET cursor = ?, cursor_version = cursor_version + 1, last_attempt_at = ?,
+                 last_success_at = ?,
+                 last_full_reconcile_at = CASE WHEN ? = 1 THEN ? ELSE last_full_reconcile_at END,
+                 last_error_code = NULL, last_error_message = NULL
+               WHERE id = ?`,
+            ).run(
+              cursorJson,
+              nowIso,
+              nowIso,
+              reconciled ? 1 : 0,
+              nowIso,
+              stateRow.id,
+            );
+          } else {
+            db.prepare(
+              `UPDATE sync_states SET cursor = ?, cursor_version = cursor_version + 1,
+                 last_attempt_at = ?, last_error_code = ?, last_error_message = ?
+               WHERE id = ?`,
+            ).run(
+              cursorJson,
+              nowIso,
+              failure?.code ?? "SYNC_PARTIAL",
+              failure?.message ?? "Sync stopped before exhausting the source",
+              stateRow.id,
+            );
+          }
         } else {
           db.prepare(
             `INSERT INTO sync_states
-               (id, user_id, provider_account_id, resource_kind, cursor, cursor_version, last_attempt_at, last_success_at, last_full_reconcile_at)
-             VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+               (id, user_id, provider_account_id, resource_kind, cursor, cursor_version,
+                last_attempt_at, last_success_at, last_full_reconcile_at, last_error_code, last_error_message)
+             VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
           ).run(
             randomUUID(),
             userId,
@@ -229,8 +369,13 @@ export async function syncProvider(
             kind,
             cursorJson,
             nowIso,
-            nowIso,
-            nowIso,
+            sweptSource ? nowIso : null,
+            reconciled ? nowIso : null,
+            sweptSource ? null : (failure?.code ?? "SYNC_PARTIAL"),
+            sweptSource
+              ? null
+              : (failure?.message ??
+                  "Sync stopped before exhausting the source"),
           );
         }
       });
@@ -242,19 +387,23 @@ export async function syncProvider(
       startedAt,
       completedAt: new Date().toISOString(),
       counts,
+      code: failure?.code,
+      message: failure?.message,
+      resetAt: failure?.resetAt,
+      completion,
+      pagesFetched,
+      resume,
       repos: outRepos,
       memberships: outMemberships,
     };
   } catch (error) {
-    // Transaction rolled back -> cursor not advanced (invariant). Report a structured failure.
-    if (error instanceof ProviderError) {
-      return {
-        ...empty,
-        code: error.code,
-        message: error.message,
-        resetAt: error.resetAt,
-      };
-    }
-    return { ...empty, code: "SYNC_FAILED", message: "Unexpected sync error" };
+    // Nothing was committed (see the guard above) -> report a structured failure.
+    const classified = classifyFailure(error);
+    return {
+      ...empty,
+      code: classified.code,
+      message: classified.message,
+      resetAt: classified.resetAt,
+    };
   }
 }

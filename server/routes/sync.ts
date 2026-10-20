@@ -114,11 +114,23 @@ syncRoutes.post("/:provider", async (c) => {
   }
 
   const legacy = mirrorToLegacy(user.id, outcome.repos, outcome.memberships);
+  // "partial" is an honest success: progress was committed, but the source was not
+  // exhausted and `resume` tells the client where the next run continues (M7-05).
   return c.json({
-    status: "success",
+    status: outcome.completion === "partial" ? "partial" : "success",
     provider: providerType,
     startedAt: outcome.startedAt,
     completedAt: outcome.completedAt,
+    completion: outcome.completion,
+    pagesFetched: outcome.pagesFetched,
+    resume: outcome.resume,
+    ...(outcome.code
+      ? {
+          code: outcome.code,
+          message: outcome.message,
+          resetAt: outcome.resetAt,
+        }
+      : {}),
     inserted: { projects: legacy.projects, links: legacy.links },
     fetched: {
       stars: outcome.memberships.filter((m) => m.kind === "star").length,

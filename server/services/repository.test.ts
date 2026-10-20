@@ -23,6 +23,7 @@ vi.mock("../env.js", () => ({
 
 import { bootstrapDb, seedUser, teardownDb } from "../testing/bootstrap.js";
 import { getRepositoryView } from "./repository.js";
+import { revokeProviderAccount, upsertProviderAccount } from "./credentials.js";
 
 function insertRepo(db: DatabaseSync, id: string, visibility: string): void {
   db.prepare(
@@ -50,7 +51,35 @@ function insertSaved(
   ).run(randomUUID(), userId, repositoryId);
 }
 
-describe("repository visibility gate (ADR-0005 D4)", () => {
+function connectProvider(
+  db: DatabaseSync,
+  userId: string,
+  repositoryId: string,
+  kind: "star" | "fork" = "star",
+): string {
+  const account = upsertProviderAccount({
+    userId,
+    providerType: "github",
+    host: "github.com",
+    remoteUserId: userId,
+    remoteUsername: userId,
+    token: `tok-${userId}`,
+  });
+  db.prepare(
+    `INSERT INTO remote_memberships
+       (id, user_id, repository_id, provider_account_id, kind, active, first_seen_at, last_seen_at)
+     VALUES (?, ?, ?, ?, ?, 1, '2026-01-01', '2026-01-01')`,
+  ).run(
+    `m-${userId}-${repositoryId}-${kind}`,
+    userId,
+    repositoryId,
+    account.id,
+    kind,
+  );
+  return account.id;
+}
+
+describe("repository visibility gate (ADR-0005 D4, M7-07)", () => {
   let db: DatabaseSync;
   beforeEach(() => {
     db = bootstrapDb();
@@ -69,10 +98,38 @@ describe("repository visibility gate (ADR-0005 D4)", () => {
     expect(getRepositoryView("priv1", "u2")).toBeNull();
   });
 
-  it("private repository metadata is visible to the user who saved it, still hidden from others", () => {
+  it("a Saved row alone does NOT unlock private metadata", () => {
     insertRepo(db, "priv1", "private");
     insertSaved(db, "u1", "priv1");
+    // M7-07: the Saved relation is not an authorization proof.
+    expect(getRepositoryView("priv1", "u1")).toBeNull();
+  });
+
+  it("a live provider account + active membership unlocks it, and is creator-agnostic", () => {
+    insertRepo(db, "priv1", "private");
+    connectProvider(db, "u1", "priv1", "star");
     expect(getRepositoryView("priv1", "u1")).not.toBeNull();
     expect(getRepositoryView("priv1", "u2")).toBeNull();
+  });
+
+  it("fork memberships authorize private metadata too", () => {
+    insertRepo(db, "priv1", "private");
+    connectProvider(db, "u1", "priv1", "fork");
+    expect(getRepositoryView("priv1", "u1")).not.toBeNull();
+  });
+
+  it("revoking the provider connection hides cached private metadata", () => {
+    insertRepo(db, "priv1", "private");
+    connectProvider(db, "u1", "priv1");
+    expect(getRepositoryView("priv1", "u1")).not.toBeNull();
+    revokeProviderAccount("u1", "github", "github.com");
+    expect(getRepositoryView("priv1", "u1")).toBeNull();
+  });
+
+  it("an inactive membership does not authorize", () => {
+    insertRepo(db, "priv1", "private");
+    connectProvider(db, "u1", "priv1");
+    db.prepare("UPDATE remote_memberships SET active = 0").run();
+    expect(getRepositoryView("priv1", "u1")).toBeNull();
   });
 });

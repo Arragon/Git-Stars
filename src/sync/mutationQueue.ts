@@ -12,6 +12,9 @@ export interface MutationQueue {
     >,
   ): Promise<string>;
   getPending(): Promise<QueuedMutation[]>;
+  /** Every queued mutation, including quarantined ones (sign-out guard, M7-03). */
+  getAll(): Promise<QueuedMutation[]>;
+  countAll(): Promise<{ pending: number; quarantined: number; total: number }>;
   complete(id: string): Promise<void>;
   markFailed(id: string, error: string): Promise<void>;
   quarantine(id: string, reason: string): Promise<void>;
@@ -49,6 +52,25 @@ export function createMutationQueue(driver: LocalStoreDriver): MutationQueue {
     return all
       .filter((m) => m.status !== "quarantined")
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async function getAll(): Promise<QueuedMutation[]> {
+    const all = await driver.getAll<QueuedMutation>("mutationQueue");
+    return all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async function countAll(): Promise<{
+    pending: number;
+    quarantined: number;
+    total: number;
+  }> {
+    const all = await driver.getAll<QueuedMutation>("mutationQueue");
+    const quarantined = all.filter((m) => m.status === "quarantined").length;
+    return {
+      pending: all.length - quarantined,
+      quarantined,
+      total: all.length,
+    };
   }
 
   async function complete(id: string): Promise<void> {
@@ -109,6 +131,8 @@ export function createMutationQueue(driver: LocalStoreDriver): MutationQueue {
   return {
     enqueue,
     getPending,
+    getAll,
+    countAll,
     complete,
     markFailed,
     quarantine,

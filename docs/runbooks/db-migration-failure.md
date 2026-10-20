@@ -31,3 +31,16 @@ partially (guarded by its per-migration transaction).
 - Do not delete `data/gitstars.db` to "reset" — that destroys user-owned state
   (library, lists, tags, notes). Only provider metadata cache is rebuildable.
 - Do not hand-edit `migrations` / `schema_meta` rows.
+
+## Drill (M7-11)
+
+Run `npm run drill:backup` (requires `SESSION_SECRET`; a drill-only value is fine) and
+append the result to [DRILL-LOG.md](DRILL-LOG.md). The script proves:
+
+- checkpoint + file-copy backup restores to an `integrity_check=ok` instance with equal
+  schema version and row counts;
+- a failed migration transaction rolls back (schema version unchanged);
+- a copy without `-wal` still opens after a checkpoint;
+- a database newer than the binary is detected (the app guard exits 1).
+
+Do not treat the drill as a substitute for a real pre-upgrade backup of `data/`.

@@ -70,21 +70,37 @@ function loadRow(repositoryId: string): RepositoryRow | null {
   return row ?? null;
 }
 
-// Private repository metadata is owner-linked only (ADR-0005 D4): a viewer may read a private
-// repo's CACHED metadata only if they have a SavedRepository or RemoteMembership for it. Public
-// metadata is readable by any authenticated user. Returns null (-> 404) to avoid leaking existence.
-// The provider-backed readers (readme/tree/file/releases) fetch live with the requester's own
-// token, so the forge enforces access there; this guard closes the cache-read path.
-function canViewRepository(userId: string, row: RepositoryRow): boolean {
+// Private repository metadata is owner-linked only (ADR-0005 D4; M7-07 / INH-1701).
+// Authorization is anchored on a LIVE provider connection — never on the Saved relation:
+// a Saved row (or its absence) must not elevate or grant metadata visibility. Public
+// metadata stays readable by any authenticated user. Returns false -> callers answer
+// with an identical 404 so existence is not leaked.
+//  1. public -> allowed;
+//  2. otherwise require an active provider_accounts row for the row's provider/host;
+//  3. and an active remote_membership for this user tied to THAT account.
+// Revoking the provider connection therefore stops cached private reads immediately.
+export function canViewRepository(
+  userId: string,
+  row: Pick<RepositoryRow, "id" | "visibility" | "provider_type" | "host">,
+): boolean {
   if (row.visibility !== "private") return true;
-  const linked = getDb()
+  const db = getDb();
+  const account = db
     .prepare(
-      `SELECT 1 AS one FROM saved_repositories WHERE user_id = ? AND repository_id = ?
-       UNION ALL
-       SELECT 1 AS one FROM remote_memberships WHERE user_id = ? AND repository_id = ?
+      `SELECT id FROM provider_accounts
+       WHERE user_id = ? AND provider_type = ? AND host = ? AND status = 'active'
+       ORDER BY last_verified_at DESC LIMIT 1`,
+    )
+    .get(userId, row.provider_type, row.host) as unknown as
+    { id: string } | undefined;
+  if (!account) return false;
+  const linked = db
+    .prepare(
+      `SELECT 1 AS one FROM remote_memberships
+       WHERE user_id = ? AND repository_id = ? AND provider_account_id = ? AND active = 1
        LIMIT 1`,
     )
-    .get(userId, row.id, userId, row.id);
+    .get(userId, row.id, account.id);
   return Boolean(linked);
 }
 
@@ -257,6 +273,11 @@ export async function refreshRepository(
     throw new ProviderError("NOT_FOUND", "Repository not found", {
       status: 404,
     });
+  // A refresh writes through the globally shared cache row — it must be authorized too.
+  if (!canViewRepository(userId, row))
+    throw new ProviderError("NOT_FOUND", "Repository not found", {
+      status: 404,
+    });
   const provider = getProvider(row.provider_type);
   if (!provider)
     throw new ProviderError(
@@ -282,6 +303,12 @@ async function withProvider<T>(
 ): Promise<T> {
   const row = loadRow(repositoryId);
   if (!row)
+    throw new ProviderError("NOT_FOUND", "Repository not found", {
+      status: 404,
+    });
+  // Provider-backed readers previously relied on the forge rejecting the requester's
+  // token; the cache row itself must be guarded as well (M7-07).
+  if (!canViewRepository(userId, row))
     throw new ProviderError("NOT_FOUND", "Repository not found", {
       status: 404,
     });

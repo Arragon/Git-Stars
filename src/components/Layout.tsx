@@ -7,7 +7,10 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
 import { Menu, Moon, Sun, Search, Star } from "lucide-react";
 import { apiGet } from "../utils/api";
-import { signOutAndResetLocal } from "../utils/session";
+import {
+  confirmUnsyncedBeforeSignOut,
+  signOutAndResetLocal,
+} from "../utils/session";
 import { useAuthStore, SessionUser } from "../store/useAuthStore";
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
 import { useSyncDrawerStore } from "../store/useSyncDrawerStore";
@@ -103,15 +106,9 @@ export const Layout: React.FC = () => {
   }, [user, location.pathname]);
 
   const handleLogout = useCallback(async () => {
-    const pending = useSyncStatusStore.getState().pendingMutationCount;
-    if (
-      pending > 0 &&
-      !window.confirm(
-        `本地还有 ${pending} 条未同步的修改，退出后将保留在设备上，下次登录可继续同步。确定退出？`,
-      )
-    ) {
-      return;
-    }
+    // M7-03: counting + confirmation live in one place so Layout and Settings cannot
+    // drift, and the queue is preserved on sign-out.
+    if (!(await confirmUnsyncedBeforeSignOut())) return;
     await signOutAndResetLocal();
     setUser(null);
     navigate("/");

@@ -53,6 +53,13 @@ jobs:
       - name: Database migration dry-run
         run: npm run migration:check
 
+      # M7-11: backup/restore/upgrade-rollback drill (checkpoint + file copy; see the
+      # script header for the node:sqlite limitation). Gates the release on real evidence.
+      - name: Backup / restore / rollback drill
+        env:
+          SESSION_SECRET: drill-only-not-a-real-secret
+        run: npm run drill:backup
+
       - name: Package server deploy artifact
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -65,6 +72,9 @@ jobs:
       - name: Checksums + release manifest
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          # M7-09: the manifest must use the tag-derived version, never package.json's
+          # placeholder. The script also asserts manifest.version == appVersion.
+          export RELEASE_VERSION="$VERSION"
           cd release
           sha256sum * > checksums.txt
           node ../scripts/release-manifest.mjs * > manifest.json
@@ -73,9 +83,33 @@ jobs:
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gitstars-release-${{ github.ref_name }}
+          name: gitstars-${{ github.ref_name }}-release
           path: release/
           if-no-files-found: error
+
+      # M7-08: prove the artifact installs with production dependencies only. Runs after
+      # upload so it cannot pollute checksums. SESSION_SECRET is required at startup.
+      - name: Production install smoke
+        env:
+          SESSION_SECRET: smoke-only-not-a-real-secret
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          export EXPECTED_VERSION="$VERSION"
+          rm -rf /tmp/prodsmoke && mkdir -p /tmp/prodsmoke
+          tar xzf "release/gitstars-${VERSION}-server.tar.gz" -C /tmp/prodsmoke
+          cd /tmp/prodsmoke
+          npm ci --omit=dev
+          DATABASE_PATH=/tmp/prodsmoke/data/smoke.db PORT=3001 npm start &
+          SERVER_PID=$!
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3001/api/health > /tmp/prodsmoke/health.json; then
+              break
+            fi
+            sleep 1
+          done
+          kill $SERVER_PID 2>/dev/null || true
+          cat /tmp/prodsmoke/health.json
+          node -e 'const h = require("/tmp/prodsmoke/health.json"); if (!h.ok) throw new Error("health not ok"); if (String(h.appVersion) !== process.env.EXPECTED_VERSION) throw new Error("version mismatch: " + h.appVersion);'
 
       - name: Job summary
         run: |

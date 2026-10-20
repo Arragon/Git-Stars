@@ -2,7 +2,7 @@
 
 ## 环境要求
 
-- Node.js 20+（推荐 22+，内置 `node:sqlite`）
+- Node.js 22+（`node:sqlite` 为必需能力；CI 固定 22.x）
 - npm 10+
 - 本地开发需要在项目根目录的 `.env` 中配置：
   - `SESSION_SECRET`（必填）
@@ -11,17 +11,20 @@
 
 ## 常用命令
 
-| 命令                 | 作用                                          |
-| -------------------- | --------------------------------------------- |
-| `npm run dev`        | 启动开发服务器（后端 + 前端并行）             |
-| `npm run dev:server` | 仅启动后端（tsx watch）                       |
-| `npm run dev:client` | 仅启动前端（Vite）                            |
-| `npm run check`      | 执行 TypeScript 项目检查（`tsc -b --noEmit`） |
-| `npm run lint`       | 执行 ESLint 检查                              |
-| `npm test`           | 执行 Vitest 单元测试                          |
-| `npm run build`      | 执行 TypeScript 构建检查并生成生产构建产物    |
-| `npm start`          | 启动生产服务器（单进程提供 API + 静态文件）   |
-| `npm run preview`    | 预览生产构建产物（仅前端）                    |
+| 命令                      | 作用                                          |
+| ------------------------- | --------------------------------------------- |
+| `npm run dev`             | 启动开发服务器（后端 + 前端并行）             |
+| `npm run dev:server`      | 仅启动后端（tsx watch）                       |
+| `npm run dev:client`      | 仅启动前端（Vite）                            |
+| `npm run check`           | 执行 TypeScript 项目检查（`tsc -b --noEmit`） |
+| `npm run lint`            | 执行 ESLint 检查                              |
+| `npm test`                | 执行 Vitest 单元测试                          |
+| `npm run build`           | 执行 TypeScript 构建检查并生成生产构建产物    |
+| `npm start`               | 启动生产服务器（单进程提供 API + 静态文件）   |
+| `npm run preview`         | 预览生产构建产物（仅前端）                    |
+| `npm run api:check`       | OpenAPI 校验（PR 含 breaking-change diff）    |
+| `npm run migration:check` | 迁移 dry-run                                  |
+| `npm run drill:backup`    | 备份/恢复/回滚演练                            |
 
 开发服务器：
 
@@ -36,52 +39,47 @@
 
 ```
 gitstars/
-├── server/              # 本地后端（Node.js + Hono + SQLite）
-│   ├── index.ts         # 入口，挂载路由与静态文件
-│   ├── env.ts           # 环境变量读取
-│   ├── db.ts            # SQLite 初始化与 schema
-│   ├── session.ts       # Session 管理（cookie + DB）
-│   ├── github.ts        # GitHub API 客户端
-│   ├── middleware/
-│   │   └── auth.ts      # 认证中间件
-│   └── routes/
-│       ├── auth.ts      # 登录/登出/OAuth
-│       ├── projects.ts  # 项目 CRUD
-│       ├── sync.ts      # GitHub 同步
-│       ├── activity.ts  # 项目活跃度分析
-│       └── collections.ts # 收藏夹 CRUD
-├── src/                 # 前端（React + Vite）
-│   ├── components/
-│   ├── pages/
-│   ├── store/
-│   └── utils/
-│       ├── api.ts       # 后端 API 客户端封装
-│       ├── github.ts    # 同步触发（调后端）
-│       └── ...
-├── data/                # SQLite 数据文件（gitignored）
-│   └── gitstars.db
-├── dist/                # 前端构建产物（gitignored）
-└── docs/
+├── server/                  # 后端（Node.js + Hono + SQLite）
+│   ├── index.ts             # 入口：路由装配、静态文件、schema 守卫
+│   ├── env.ts               # 环境变量（生产强校验）
+│   ├── db.ts                # SQLite 初始化（legacy schema + migrations）
+│   ├── migrations.ts        # 版本化迁移（每迁移一个事务）
+│   ├── providers/           # github（真实）/ gitlab、gitee（fail-closed stub）
+│   ├── services/            # repository、syncEngine、listsIo、publication、account*
+│   ├── routes/              # auth、library、lists、tags、repositories、discover、
+│   │                        # publications、public、hub、changes、sync、account…
+│   ├── lib/                 # egress、rateLimit、obs、fractionalIndex
+│   └── testing/             # bootstrap（内存 DB）、shareFixtures
+├── src/                     # 前端（React + Vite）
+│   ├── pages/               # Home、Library、Lists、RepositoryView、Hub、Settings…
+│   ├── components/          # SyncDrawer、PendingMutations、ConflictPanel…
+│   ├── data/                # IndexedDB/InMemory 驱动、缓存、离线 mutation
+│   ├── sync/                # mutationQueue、pushReplay、pullSync、idMap、conflict*
+│   ├── store/               # Zustand（auth、sync、toast、AI 配置）
+│   └── utils/               # API 客户端、筛选、membership、noteSaveState…
+├── scripts/                 # bench、api:check、migration-check、release-manifest、drill
+├── docs/                    # ADR、runbooks、支持矩阵、证据索引
+├── data/                    # SQLite 数据文件（gitignored）
+└── dist/                    # 前端构建产物（gitignored）
 ```
 
 ## 数据库
 
 SQLite 数据库文件默认位于 `data/gitstars.db`，可通过 `DATABASE_PATH` 环境变量自定义。
 
-启动时自动执行 `CREATE TABLE IF NOT EXISTS` 初始化 schema，无需手动迁移。
+启动时先建 legacy 表，再执行 `server/migrations.ts` 的版本化迁移（每个迁移一个事务，
+`schema_meta.schema_version` 记录当前版本）。数据库版本高于二进制时服务拒绝启动。
 
-核心表：
+核心表（新域模型，ADR-0003）：`users`、`sessions`、`provider_accounts`、
+`repositories`、`saved_repositories`、`lists`、`list_items`、`tags`、
+`repository_tags`、`preferences`、`sync_states`、`change_log`、`idempotency_keys`、
+`list_publications`、`publication_reports`、`audit_events`。
+旧表 `projects` / `user_projects` / `collections` / `collection_projects` 仅为迁移兼容保留。
 
-- `users`：用户信息 + GitHub access_token
-- `sessions`：登录会话（30 天有效期）
-- `projects`：仓库元信息
-- `user_projects`：用户与仓库关联（star/fork）
-- `collections`：用户自定义收藏夹
-- `collection_projects`：收藏夹与项目关联
+备份：`PRAGMA wal_checkpoint(TRUNCATE)` 后复制 `db` / `-wal` / `-shm`；运行
+`npm run drill:backup` 验证恢复流程（证据记录在 `docs/runbooks/DRILL-LOG.md`）。
 
-备份：直接复制 `data/gitstars.db` 文件。
-
-重置：停止服务，删除 `data/gitstars.db*`，重新启动。
+重置：停止服务，删除 `data/gitstars.db*`，重新启动（会删除用户数据）。
 
 ## 基线记录
 
@@ -94,10 +92,7 @@ SQLite 数据库文件默认位于 `data/gitstars.db`，可通过 `DATABASE_PATH
 
 ### `npm run lint`
 
-- 退出码：`1`
-- 共 `17` 个 error（历史遗留，不在本次迁移范围）。
-- `@typescript-eslint/no-explicit-any`：`16` 个 error
-- `prefer-const`：`1` 个 error
+- 退出码：`0`（M7 batch 重新采集）
 
 ### `npm run build`
 
@@ -106,12 +101,10 @@ SQLite 数据库文件默认位于 `data/gitstars.db`，可通过 `DATABASE_PATH
 
 ### `npm test`
 
-- 退出码：`0`
-- 测试套件：
-  - `src/utils/collections.test.ts`
-  - `src/utils/syncIdentity.test.ts`
-  - `server/db.test.ts`
-  - `server/routes/auth.test.ts`
+- 退出码：`0`（洁净环境、无开发者 `.env`）
+- 覆盖：契约/迁移/路由/服务/同步一致性/数据隔离/安全负向用例
+- 测试环境通过 `vite.config.ts` 的 `test.env` 注入受控 `SESSION_SECRET`；
+  生产启动仍要求真实密钥（`server/env.ts`）
 
 ## CI 门禁
 

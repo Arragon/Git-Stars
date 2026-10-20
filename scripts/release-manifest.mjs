@@ -59,4 +59,41 @@ const manifest = {
   signedStatus: "unsigned-test-artifact",
 };
 
+// --- M7-09 consistency gates -------------------------------------------------------
+// A release must be traceable: tag -> artifact name -> manifest -> runtime /api/health.
+const problems = [];
+const appVersion = constant("APP_VERSION");
+const tagVersion = process.env.RELEASE_VERSION;
+
+if (tagVersion && appVersion && tagVersion !== appVersion) {
+  problems.push(
+    `RELEASE_VERSION (${tagVersion}) != server/versions.ts APP_VERSION (${appVersion})`,
+  );
+}
+if (manifest.version !== manifest.appVersion) {
+  problems.push(
+    `manifest.version (${manifest.version}) != manifest.appVersion (${manifest.appVersion})`,
+  );
+}
+for (const artifact of artifacts) {
+  if (
+    artifact.name.startsWith("gitstars-") &&
+    !artifact.name.includes(version)
+  ) {
+    problems.push(
+      `artifact ${artifact.name} does not carry version ${version}`,
+    );
+  }
+}
+if (!tagVersion && pkg.version === "0.0.0") {
+  problems.push(
+    "Refusing to emit a manifest with the 0.0.0 placeholder; set RELEASE_VERSION from the tag",
+  );
+}
+if (problems.length > 0) {
+  console.error("Release manifest consistency check failed:");
+  for (const problem of problems) console.error(`  ✗ ${problem}`);
+  process.exit(1);
+}
+
 console.log(JSON.stringify(manifest, null, 2));
