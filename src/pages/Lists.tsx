@@ -60,6 +60,8 @@ import {
 } from "../utils/gitstarsApi";
 import { ApiError, apiPut } from "../utils/api";
 import { updateListItemNote } from "../data/offlineMutations";
+import { useAuthStore } from "../store/useAuthStore";
+import { clearDraft, readDraft, saveDraft } from "../data/drafts";
 import {
   addListItemOffline,
   createListOffline,
@@ -417,6 +419,11 @@ export const Lists: React.FC = () => {
       setError(msg(out.error));
       return;
     }
+    clearDraft(
+      useAuthStore.getState().user?.id ?? "anon",
+      "list_item",
+      `${selected.id}:${noteItem.savedRepositoryId}`,
+    );
     await reloadLists();
     showToast("列表内备注已保存");
     setNoteItem(null);
@@ -1070,13 +1077,18 @@ export const Lists: React.FC = () => {
                             title={
                               item.note ? "编辑列表内备注" : "添加列表内备注"
                             }
-                            onClick={() =>
+                            onClick={() => {
+                              const draft = readDraft(
+                                useAuthStore.getState().user?.id ?? "anon",
+                                "list_item",
+                                `${selected.id}:${item.savedRepositoryId}`,
+                              );
                               setNoteItem({
                                 savedRepositoryId: item.savedRepositoryId,
                                 name: item.repository.name,
-                                note: item.note ?? "",
-                              })
-                            }
+                                note: draft ?? item.note ?? "",
+                              });
+                            }}
                           >
                             <FileText className="ico small" />
                           </button>
@@ -1149,9 +1161,19 @@ export const Lists: React.FC = () => {
           className="field"
           aria-label="列表内备注"
           value={noteItem?.note ?? ""}
-          onChange={(e) =>
-            setNoteItem((n) => (n ? { ...n, note: e.target.value } : n))
-          }
+          onChange={(e) => {
+            const value = e.target.value;
+            setNoteItem((n) => (n ? { ...n, note: value } : n));
+            if (selected && noteItem) {
+              // Keep the text across dialog close/refresh, per account (M8-06).
+              saveDraft(
+                useAuthStore.getState().user?.id ?? "anon",
+                "list_item",
+                `${selected.id}:${noteItem.savedRepositoryId}`,
+                value,
+              );
+            }
+          }}
         />
       </Dialog>
 

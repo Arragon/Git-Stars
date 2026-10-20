@@ -60,6 +60,8 @@ import {
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
 import { useToastStore } from "../store/useToastStore";
 import { useSyncDrawerStore } from "../store/useSyncDrawerStore";
+import { useAuthStore } from "../store/useAuthStore";
+import { clearDraft, readDraft, saveDraft } from "../data/drafts";
 import {
   INITIAL_NOTE_SAVE,
   noteSaveReducer,
@@ -110,16 +112,42 @@ export const RepositoryView: React.FC = () => {
   const lastSyncedNote = useRef<string | null>(null);
 
   // Mirror the authoritative note into the draft, but never clobber a failed/conflicted
-  // draft that the user still needs to recover (M7-14).
+  // draft that the user still needs to recover (M7-14). A locally buffered draft wins
+  // over the server copy until it is saved or discarded (M8-06).
   useEffect(() => {
     if (noteState.status === "failed" || noteState.status === "conflict")
       return;
     const value = repo?.saved?.note ?? "";
-    if (value !== lastSyncedNote.current) {
-      lastSyncedNote.current = value;
+    if (value === lastSyncedNote.current) return;
+    lastSyncedNote.current = value;
+    const savedId = repo?.saved?.id;
+    const draft = savedId
+      ? readDraft(
+          useAuthStore.getState().user?.id ?? "anon",
+          "saved_repository",
+          savedId,
+        )
+      : null;
+    if (draft !== null && draft !== value) {
+      setNoteDraft(draft);
+      setNoteState({ status: "draft" });
+    } else {
       setNoteDraft(value);
     }
-  }, [repo?.saved?.note, noteState.status]);
+  }, [repo?.saved?.note, repo?.saved?.id, noteState.status]);
+
+  // Debounced draft persistence: text survives refresh/route changes even before blur.
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queueDraft = (value: string) => {
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => {
+      if (!repo?.saved) return;
+      const saved = repo.saved.note ?? "";
+      const owner = useAuthStore.getState().user?.id ?? "anon";
+      if (value === saved) clearDraft(owner, "saved_repository", repo.saved.id);
+      else saveDraft(owner, "saved_repository", repo.saved.id, value);
+    }, 700);
+  };
 
   const [readme, setReadme] = useState<string | null>(null);
   const [entries, setEntries] = useState<TreeEntryView[] | null>(null);
@@ -354,6 +382,38 @@ export const RepositoryView: React.FC = () => {
     }
   };
 
+  /** Adopt an AI tag as a manual tag (M8-06): additive only, never renames user tags. */
+  const adoptAiTag = async (name: string) => {
+    if (!repo?.saved) return;
+    const existing = tags.find((t) => t.name === name);
+    if (!existing && !isOnline) {
+      setError("离线状态暂不支持新建标签，请联网后重试");
+      return;
+    }
+    try {
+      const tag = existing ?? (await createTag(name));
+      await act(
+        () => attachTagToSaved(repo.saved!.id, tag.id),
+        () =>
+          setRepo((current) =>
+            current?.saved
+              ? {
+                  ...current,
+                  saved: {
+                    ...current.saved,
+                    tags: current.saved.tags.some((t) => t.id === tag.id)
+                      ? current.saved.tags
+                      : [...current.saved.tags, { id: tag.id, name: tag.name }],
+                  },
+                }
+              : current,
+          ),
+      );
+    } catch (e) {
+      setError(friendly(e, "标签添加失败"));
+    }
+  };
+
   /** Persist the note draft with honest, field-level status (M7-14 / INH-1708). */
   const saveNote = async (value: string) => {
     if (!repo?.saved) return;
@@ -384,6 +444,11 @@ export const RepositoryView: React.FC = () => {
               : current,
           );
           setNoteState({ status: "confirmed" });
+          clearDraft(
+            useAuthStore.getState().user?.id ?? "anon",
+            "saved_repository",
+            repo.saved!.id,
+          );
         } else if (status === "conflict") {
           setNoteState({ status: "conflict", error: outcomeErrorLabel(out) });
         } else if (status === "failed") {
@@ -774,6 +839,15 @@ export const RepositoryView: React.FC = () => {
                     {(repo.saved.aiTags ?? []).map((name) => (
                       <span className="badge violet" key={`ai-${name}`}>
                         {name}
+                        <button
+                          type="button"
+                          className="badge-add"
+                          title="转为手动标签"
+                          aria-label={`把 ${name} 转为手动标签`}
+                          onClick={() => void adoptAiTag(name)}
+                        >
+                          +
+                        </button>
                       </span>
                     ))}
                   </div>
@@ -793,6 +867,7 @@ export const RepositoryView: React.FC = () => {
                   onChange={(e) => {
                     setNoteDraft(e.target.value);
                     setNoteState((s) => noteSaveReducer(s, { type: "edit" }));
+                    queueDraft(e.target.value);
                   }}
                   onBlur={(e) => void saveNote(e.target.value)}
                 />

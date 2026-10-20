@@ -5,6 +5,7 @@
 
 export type NoteSaveStatus =
   | "idle"
+  | "draft"
   | "saving"
   | "saved-local"
   | "pending"
@@ -19,6 +20,7 @@ export interface NoteSaveState {
 
 export type NoteSaveEvent =
   | { type: "edit" }
+  | { type: "draft" }
   | { type: "save" }
   | { type: "confirmed" }
   | { type: "pending" }
@@ -34,6 +36,8 @@ export function noteSaveReducer(
   switch (event.type) {
     case "edit":
       return { status: "idle" };
+    case "draft":
+      return { status: "draft" };
     case "save":
       return { status: "saving" };
     case "confirmed":
@@ -75,6 +79,8 @@ export function noteStatusLabel(status: NoteSaveStatus): string {
   switch (status) {
     case "idle":
       return "失焦后自动保存";
+    case "draft":
+      return "草稿已保存在本地";
     case "saving":
       return "保存中…";
     case "saved-local":

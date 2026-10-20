@@ -30,6 +30,13 @@ describe("noteSaveReducer", () => {
     ).toEqual({ status: "conflict", error: "409" });
   });
 
+  it("marks a locally buffered draft without claiming a server save", () => {
+    const draft = noteSaveReducer(INITIAL_NOTE_SAVE, { type: "draft" });
+    expect(draft.status).toBe("draft");
+    expect(shouldAdvanceVersion("draft")).toBe(false);
+    expect(noteStatusLabel("draft")).toContain("本地");
+  });
+
   it("returns to idle when the user edits again", () => {
     const failed = noteSaveReducer(INITIAL_NOTE_SAVE, { type: "failed" });
     expect(noteSaveReducer(failed, { type: "edit" }).status).toBe("idle");
