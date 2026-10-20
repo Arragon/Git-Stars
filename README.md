@@ -11,6 +11,8 @@
 - 数据库：SQLite（`data/gitstars.db`，自动初始化）
 - 数据获取：GitHub REST API（服务端代理）
 
+> 真实支持范围以 [docs/SUPPORT-MATRIX.md](docs/SUPPORT-MATRIX.md) 为准：**Web + GitHub 为已支持主链**；GitLab/Gitee 目前是 fail-closed stub（未实现），桌面/移动客户端为 Deferred。
+
 ## 快速开始（本地开发）
 
 ### 1. 安装依赖
@@ -59,16 +61,19 @@ npm start
 
 ## 环境变量
 
-| 变量                   | 必填   | 默认值                    | 说明                           |
-| ---------------------- | ------ | ------------------------- | ------------------------------ |
-| `PORT`                 | 否     | `3001`                    | 后端服务端口                   |
-| `DATABASE_PATH`        | 否     | `./data/gitstars.db`      | SQLite 数据库文件路径          |
-| `SESSION_SECRET`       | **是** | -                         | Session cookie 签名密钥        |
-| `PUBLIC_URL`           | 否     | `http://localhost:{PORT}` | 用于生成 OAuth 回调 URL        |
-| `COOKIE_SECURE`        | 否     | `false`                   | HTTPS 部署时设为 `true`        |
-| `GITHUB_CLIENT_ID`     | 否     | -                         | GitHub OAuth App Client ID     |
-| `GITHUB_CLIENT_SECRET` | 否     | -                         | GitHub OAuth App Client Secret |
-| `LOCAL_DEV_USER`       | 否     | -                         | 本地开发登录的 GitHub 用户名   |
+| 变量                   | 必填   | 默认值                    | 说明                              |
+| ---------------------- | ------ | ------------------------- | --------------------------------- |
+| `PORT`                 | 否     | `3001`                    | 后端服务端口                      |
+| `DATABASE_PATH`        | 否     | `./data/gitstars.db`      | SQLite 数据库文件路径             |
+| `SESSION_SECRET`       | **是** | -                         | Session cookie 签名密钥           |
+| `PUBLIC_URL`           | 否     | `http://localhost:{PORT}` | 用于生成 OAuth 回调 URL           |
+| `COOKIE_SECURE`        | 否     | `false`                   | HTTPS 部署时设为 `true`           |
+| `GITHUB_CLIENT_ID`     | 否     | -                         | GitHub OAuth App Client ID        |
+| `GITHUB_CLIENT_SECRET` | 否     | -                         | GitHub OAuth App Client Secret    |
+| `LOCAL_DEV_USER`       | 否     | -                         | 本地开发登录的 GitHub 用户名      |
+| `CREDENTIAL_KEY`       | 否     | 由 SESSION_SECRET 派生    | Provider token 加密密钥           |
+| `ALLOW_DEV_LOGIN`      | 否     | `false`                   | 生产环境是否允许 dev-login        |
+| `ADMIN_TOKEN`          | 否     | -                         | Admin API Bearer Token（空=禁用） |
 
 ### 登录方式
 
@@ -107,33 +112,42 @@ OAuth 模式可以拉取 private repo 的 star/fork，且不受匿名限流。
 
 所有数据存储在本地 SQLite 文件 `data/gitstars.db`（可通过 `DATABASE_PATH` 自定义）。
 
-核心表：
+核心表（新域模型，见 ADR-0003）：
 
-- `users`：用户信息 + GitHub access_token
-- `sessions`：登录会话
-- `projects`：仓库元信息（GitHub 公共数据）
-- `user_projects`：用户与仓库关联（star/fork + 时间）
-- `collections`：用户自定义收藏夹
-- `collection_projects`：收藏夹与项目关联
+- `users` / `sessions`：账户与登录会话
+- `provider_accounts`：平台连接与加密后的 token（`encrypted_token`）
+- `repositories`：仓库元信息缓存（全局共享，按 provider identity 唯一）
+- `saved_repositories`：用户收藏与仓库级备注
+- `lists` / `list_items`：列表与条目（含条目级备注、分数排序键）
+- `tags` / `repository_tags`：手动标签
+- `preferences` / `sync_states` / `change_log` / `idempotency_keys`：偏好、同步游标、变更流、幂等
+- `list_publications` / `publication_reports` / `audit_events`：公开分享、举报与审计
 
-备份：直接复制 `data/gitstars.db` 文件即可。
+旧表（`projects` / `user_projects` / `collections` / `collection_projects`）为迁移兼容保留，不再作为权威数据源。
+
+备份：先执行 `PRAGMA wal_checkpoint(TRUNCATE)`，再一并复制 `data/gitstars.db`、`data/gitstars.db-wal`、`data/gitstars.db-shm`。可运行 `npm run drill:backup` 验证备份/恢复流程。
 
 ## 开发与校验
 
 ```bash
-npm run dev          # 启动开发服务器（前后端并行）
-npm run check        # TypeScript 类型检查
-npm run lint         # ESLint 检查
-npm test             # Vitest 单元测试
-npm run build        # 生产构建（前端 + 类型检查）
-npm start            # 启动生产服务器
+npm run dev           # 启动开发服务器（前后端并行）
+npm run check         # TypeScript 类型检查
+npm run lint          # ESLint 检查
+npm test              # Vitest（单元 / 契约 / 集成 / 同步一致性）
+npm run api:check     # OpenAPI 契约校验（PR 上含 breaking-change diff）
+npm run build         # 生产构建（前端 + 类型检查）
+npm run migration:check  # 迁移 dry-run
+npm run drill:backup  # 实例备份/恢复/回滚演练
+npm start             # 启动生产服务器
 ```
 
 更多开发细节请参阅 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 
 ## 本地后端架构
 
-详见 [docs/LOCAL-BACKEND.md](docs/LOCAL-BACKEND.md)。
+新架构（provider adapter、Repository View、离线同步、分享）请参阅
+[docs/adr/](docs/adr/) 与 [docs/SUPPORT-MATRIX.md](docs/SUPPORT-MATRIX.md)。
+[docs/LOCAL-BACKEND.md](docs/LOCAL-BACKEND.md) 为早期本地单用户架构的历史文档，仅作背景参考。
 
 ## 信息安全说明
 
@@ -141,7 +155,7 @@ npm start            # 启动生产服务器
 
 - `SESSION_SECRET` 用于签名 session cookie，不要泄露
 - `GITHUB_CLIENT_SECRET` 只存在服务端 `.env`，不会进入前端构建
-- GitHub `access_token` 存储在 SQLite `users.access_token` 列，不会返回给前端
+- GitHub token 经加密后存储在 `provider_accounts.encrypted_token`，不会返回给前端
 
 ### 认证与令牌
 
@@ -182,4 +196,4 @@ Dashboard 支持为项目生成 AI 摘要/标签。当前实现为"浏览器直�
 
 ### 如何重置数据？
 
-停止服务，删除 `data/gitstars.db`（及 `.db-wal`、`.db-shm`），重新启动即可。
+停止服务，删除 `data/gitstars.db`（及 `.db-wal`、`.db-shm`），重新启动即可。注意这会删除账户、收藏、列表与备注等用户数据。

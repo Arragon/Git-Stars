@@ -10,6 +10,7 @@ import {
   storeIdempotentResponse,
 } from "../services/mutations.js";
 import { importCommit, importPreview } from "../services/listsIo.js";
+import { canViewRepository } from "../services/repository.js";
 import { apiError } from "../httpErrors.js";
 
 // Library = SavedRepository CRUD (ADR-0003, ADR-0006). User-owned knowledge; provider
@@ -162,8 +163,18 @@ libraryRoutes.get("/", (c) => {
       `${SELECT_JOIN} WHERE ${where.join(" AND ")} ORDER BY ${sortCol} ${order}`,
     )
     .all(...params) as unknown as JoinedRow[];
-  const tagMap = tagsFor(rows.map((r) => r.id));
-  return c.json(rows.map((r) => serialize(r, tagMap.get(r.id) ?? [])));
+  // A Saved row must never surface private metadata the viewer cannot currently access
+  // (revoked provider connection, wrong account) — M7-07 / INH-1701.
+  const visible = rows.filter((r) =>
+    canViewRepository(userId, {
+      id: r.repository_id,
+      visibility: r.visibility,
+      provider_type: r.provider_type,
+      host: r.host,
+    }),
+  );
+  const tagMap = tagsFor(visible.map((r) => r.id));
+  return c.json(visible.map((r) => serialize(r, tagMap.get(r.id) ?? [])));
 });
 
 // Save a repository to the user's library. Idempotent by (user, repository): re-saving an
@@ -187,9 +198,22 @@ libraryRoutes.post("/", async (c) => {
 
   const db = getDb();
   const repo = db
-    .prepare("SELECT id FROM repositories WHERE id = ?")
-    .get(repositoryId) as { id: string } | undefined;
+    .prepare(
+      "SELECT id, visibility, provider_type, host FROM repositories WHERE id = ?",
+    )
+    .get(repositoryId) as unknown as
+    | {
+        id: string;
+        visibility: string | null;
+        provider_type: string;
+        host: string;
+      }
+    | undefined;
   if (!repo) return apiError(c, 404, "NOT_FOUND", "Repository not found");
+  // Knowing a local UUID is not authorization: the Saved relation must not elevate
+  // private metadata visibility (M7-07). Same 404 wording as "not found" above.
+  if (!canViewRepository(userId, repo))
+    return apiError(c, 404, "NOT_FOUND", "Repository not found");
 
   const nowIso = new Date().toISOString();
   const existing = db
@@ -236,6 +260,15 @@ libraryRoutes.get("/:id", (c) => {
     .get(id, userId) as unknown as JoinedRow | undefined;
   if (!row || row.deleted_at)
     return apiError(c, 404, "NOT_FOUND", "Saved repository not found");
+  if (
+    !canViewRepository(userId, {
+      id: row.repository_id,
+      visibility: row.visibility,
+      provider_type: row.provider_type,
+      host: row.host,
+    })
+  )
+    return apiError(c, 404, "NOT_FOUND", "Saved repository not found");
   return c.json(serialize(row, tagsFor([id]).get(id) ?? []));
 });
 
@@ -250,7 +283,10 @@ libraryRoutes.put("/:id", async (c) => {
   const db = getDb();
   const current = db
     .prepare(
-      "SELECT id, version, note, status, ai_summary, ai_tags FROM saved_repositories WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+      `SELECT sr.id, sr.version, sr.note, sr.status, sr.ai_summary, sr.ai_tags,
+              sr.repository_id, r.visibility, r.provider_type, r.host
+       FROM saved_repositories sr JOIN repositories r ON r.id = sr.repository_id
+       WHERE sr.id = ? AND sr.user_id = ? AND sr.deleted_at IS NULL`,
     )
     .get(id, userId) as unknown as
     | {
@@ -260,19 +296,44 @@ libraryRoutes.put("/:id", async (c) => {
         status: string;
         ai_summary: string | null;
         ai_tags: string;
+        repository_id: string;
+        visibility: string | null;
+        provider_type: string;
+        host: string;
       }
     | undefined;
   if (!current)
     return apiError(c, 404, "NOT_FOUND", "Saved repository not found");
+  if (
+    !canViewRepository(userId, {
+      id: current.repository_id,
+      visibility: current.visibility,
+      provider_type: current.provider_type,
+      host: current.host,
+    })
+  )
+    return apiError(c, 404, "NOT_FOUND", "Saved repository not found");
 
   const ifMatch = parseIfMatch(c.req.header("If-Match"));
   if (ifMatch && ifMatch.version !== Number(current.version)) {
+    // M7-14: return the current business state (not just an etag string) so the client
+    // conflict resolver can merge fields instead of spreading a string.
     return apiError(
       c,
       409,
       "VERSION_CONFLICT",
       "Saved repository was modified",
-      { current: makeEtag(id, Number(current.version)) },
+      {
+        current: {
+          id,
+          note: current.note,
+          status: current.status,
+          aiSummary: current.ai_summary,
+          aiTags: parseJson<string[]>(current.ai_tags, []),
+          version: Number(current.version),
+        },
+        etag: makeEtag(id, Number(current.version)),
+      },
     );
   }
 

@@ -54,7 +54,7 @@ function resolveRef(spec, ref) {
 
 // --- 1. Structural validation ---
 
-function validate(spec) {
+export function validate(spec) {
   const problems = [];
 
   if (!/^3\.\d+\.\d+$/.test(String(spec.openapi ?? ""))) {
@@ -125,14 +125,30 @@ function validate(spec) {
 // --- 2. Breaking-change diff ---
 
 function operations(spec) {
-  const map = new Map(); // "GET /path" -> operation object
+  const map = new Map(); // "GET /path" -> { op, item }
   for (const [path, item] of Object.entries(spec?.paths ?? {})) {
     for (const method of Object.keys(item)) {
-      if (HTTP_METHODS.has(method))
-        map.set(`${method.toUpperCase()} ${path}`, item[method]);
+      if (HTTP_METHODS.has(method)) {
+        map.set(`${method.toUpperCase()} ${path}`, {
+          op: item[method],
+          item,
+        });
+      }
     }
   }
   return map;
+}
+
+// Merge path-item and operation parameters, resolving $ref. Without this the parameter
+// gate silently ignores every $ref'd parameter (the common case in our spec).
+function paramsOf(spec, item, op) {
+  const merged = new Map(); // "in:name" -> param
+  for (const raw of [...(item?.parameters ?? []), ...(op?.parameters ?? [])]) {
+    const param = raw?.$ref ? resolveRef(spec, raw.$ref) : raw;
+    if (!param?.name || !param?.in) continue;
+    merged.set(`${param.in}:${param.name}`, param);
+  }
+  return merged;
 }
 
 function requiredBodyFields(spec, op) {
@@ -140,6 +156,13 @@ function requiredBodyFields(spec, op) {
   const resolved =
     schema?.$ref && spec ? resolveRef(spec, schema.$ref) : schema;
   return new Set(resolved?.required ?? []);
+}
+
+function bodyPropertyNames(spec, op) {
+  const schema = op?.requestBody?.content?.["application/json"]?.schema;
+  const resolved =
+    schema?.$ref && spec ? resolveRef(spec, schema.$ref) : schema;
+  return new Set(Object.keys(resolved?.properties ?? {}));
 }
 
 function responseStatuses(op) {
@@ -152,7 +175,7 @@ function errorCodes(spec) {
   return new Set(codeProp?.enum ?? []);
 }
 
-function diffBreaking(base, next) {
+export function diffBreaking(base, next) {
   const breaking = [];
 
   const baseOps = operations(base);
@@ -161,29 +184,58 @@ function diffBreaking(base, next) {
     if (!nextOps.has(key)) breaking.push(`operation removed: ${key}`);
   }
   for (const key of baseOps.keys()) {
-    const before = responseStatuses(baseOps.get(key));
+    const before = baseOps.get(key);
     const after = nextOps.get(key);
     if (!after) continue;
-    for (const status of before) {
-      if (!responseStatuses(after).has(status)) {
+    const beforeOp = before.op;
+    const afterOp = after.op;
+
+    for (const status of responseStatuses(beforeOp)) {
+      if (!responseStatuses(afterOp).has(status)) {
         breaking.push(`response ${status} removed from ${key}`);
       }
     }
-    // A parameter that was optional becoming required breaks existing clients.
-    const beforeParams = baseOps.get(key).parameters ?? [];
-    const afterParams = after.parameters ?? [];
-    for (const p of beforeParams) {
-      if (!p.required) continue;
-      const match = afterParams.find((q) => q.name === p.name && q.in === p.in);
-      if (!match)
-        breaking.push(`required parameter ${p.name} removed from ${key}`);
+
+    // Parameters: removal of a required one, optional -> required, and newly required.
+    const beforeParams = paramsOf(base, before.item, beforeOp);
+    const afterParams = paramsOf(next, after.item, afterOp);
+    for (const [id, param] of beforeParams) {
+      const match = afterParams.get(id);
+      if (param.required && !match) {
+        breaking.push(`required parameter ${param.name} removed from ${key}`);
+      } else if (!param.required && match?.required) {
+        breaking.push(`parameter ${param.name} became required in ${key}`);
+      }
     }
-    const beforeBody = requiredBodyFields(base, baseOps.get(key));
-    const afterBody = requiredBodyFields(next, after);
+    for (const [id, param] of afterParams) {
+      if (param.required && !beforeParams.has(id)) {
+        breaking.push(`new required parameter ${param.name} added to ${key}`);
+      }
+    }
+
+    // Request body: required fields may only shrink if they were optional; a field that
+    // was optional becoming required (or a newly required field) breaks old clients.
+    const beforeBody = requiredBodyFields(base, beforeOp);
+    const afterBody = requiredBodyFields(next, afterOp);
+    const afterAllFields = bodyPropertyNames(next, afterOp);
     for (const field of beforeBody) {
-      if (!afterBody.has(field)) {
+      // Removed from the schema entirely is breaking; becoming optional is a relaxation.
+      if (!afterAllFields.has(field)) {
         breaking.push(`required request field "${field}" removed from ${key}`);
       }
+    }
+    for (const field of afterBody) {
+      if (!beforeBody.has(field)) {
+        breaking.push(`request field "${field}" became required in ${key}`);
+      }
+    }
+    if (
+      beforeOp.requestBody &&
+      afterOp.requestBody &&
+      !beforeOp.requestBody.required &&
+      afterOp.requestBody.required
+    ) {
+      breaking.push(`request body became required in ${key}`);
     }
   }
 
@@ -200,25 +252,32 @@ function diffBreaking(base, next) {
 
 // --- main ---
 
-const spec = loadSpec(SPEC_PATH);
-const validationProblems = validate(spec);
-if (validationProblems.length > 0) fail(validationProblems);
-console.log(
-  `✓ ${SPEC_PATH} is structurally valid (${Object.keys(spec.paths).length} paths)`,
-);
+function main() {
+  const spec = loadSpec(SPEC_PATH);
+  const validationProblems = validate(spec);
+  if (validationProblems.length > 0) fail(validationProblems);
+  console.log(
+    `✓ ${SPEC_PATH} is structurally valid (${Object.keys(spec.paths).length} paths)`,
+  );
 
-const basePath = process.env.OPENAPI_BASE;
-if (basePath) {
-  const base = loadSpec(basePath);
-  const breaking = diffBreaking(base, spec);
-  if (breaking.length > 0) {
-    console.error(
-      `\nBreaking API contract changes vs ${basePath}:\n` +
-        breaking.map((b) => `  ✗ ${b}`).join("\n"),
-    );
-    process.exit(1);
+  const basePath = process.env.OPENAPI_BASE;
+  if (basePath) {
+    const base = loadSpec(basePath);
+    const breaking = diffBreaking(base, spec);
+    if (breaking.length > 0) {
+      console.error(
+        `\nBreaking API contract changes vs ${basePath}:\n` +
+          breaking.map((b) => `  ✗ ${b}`).join("\n"),
+      );
+      process.exit(1);
+    }
+    console.log(`✓ no breaking changes vs ${basePath}`);
+  } else {
+    console.log("ℹ OPENAPI_BASE not set — skipping breaking-change diff.");
   }
-  console.log(`✓ no breaking changes vs ${basePath}`);
-} else {
-  console.log("ℹ OPENAPI_BASE not set — skipping breaking-change diff.");
+}
+
+// Only run when invoked as a CLI (the test file imports the pure functions instead).
+if (process.argv[1] && process.argv[1].endsWith("check-api-contract.mjs")) {
+  main();
 }

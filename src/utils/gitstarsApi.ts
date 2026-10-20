@@ -276,7 +276,10 @@ export const searchRepositories = (q: string, provider = "github") =>
 
 // Sync
 export interface SyncResponse {
-  status: string;
+  status: "success" | "partial" | string;
+  completion?: "complete" | "partial" | "failed" | "paused";
+  pagesFetched?: number;
+  resume?: Array<{ kind: "star" | "fork"; page: number }>;
   counts?: { repositories: number; savedCreated: number; deactivated: number };
   code?: string;
   message?: string;

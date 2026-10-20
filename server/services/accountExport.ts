@@ -13,6 +13,7 @@
 //   schemaVersion 1.
 
 import { getDb } from "../db.js";
+import { canViewRepository } from "./repository.js";
 
 export const ACCOUNT_EXPORT_FORMAT = "gitstars-account-export";
 export const ACCOUNT_EXPORT_SCHEMA_VERSION = 1;
@@ -53,6 +54,7 @@ interface ListRow {
 interface ItemRow {
   id: string;
   list_id: string;
+  saved_id: string;
   note: string | null;
   position_key: string;
   canonical_key: string;
@@ -143,7 +145,7 @@ export function buildAccountExport(userId: string): AccountExport {
       }
     | undefined;
 
-  const savedRows = db
+  const savedRowsAll = db
     .prepare(
       `SELECT sr.id, sr.repository_id, sr.status, sr.note, sr.ai_summary, sr.ai_tags,
               sr.added_at, sr.updated_at, sr.deleted_at,
@@ -154,6 +156,17 @@ export function buildAccountExport(userId: string): AccountExport {
        WHERE sr.user_id = ? ORDER BY sr.added_at ASC`,
     )
     .all(userId) as unknown as SavedRow[];
+  // Never export private metadata the user cannot currently access (stale Saved rows from
+  // an older account/credential must not become an export leak) — M7-07 / INH-1701.
+  const savedRows = savedRowsAll.filter((r) =>
+    canViewRepository(userId, {
+      id: r.repository_id,
+      visibility: r.visibility,
+      provider_type: r.provider_type,
+      host: r.host,
+    }),
+  );
+  const visibleSavedIds = new Set(savedRows.map((r) => r.id));
 
   const tagRows = db
     .prepare(
@@ -175,17 +188,19 @@ export function buildAccountExport(userId: string): AccountExport {
     )
     .all(userId) as unknown as ListRow[];
 
-  const itemRows = db
-    .prepare(
-      `SELECT li.id, li.list_id, li.note, li.position_key,
-              r.canonical_key, r.name, r.web_url, r.provider_type, r.host
-       FROM list_items li
-       JOIN saved_repositories sr ON sr.id = li.saved_repository_id
-       JOIN repositories r ON r.id = sr.repository_id
-       WHERE sr.user_id = ?
-       ORDER BY li.position_key ASC`,
-    )
-    .all(userId) as unknown as ItemRow[];
+  const itemRows = (
+    db
+      .prepare(
+        `SELECT li.id, li.list_id, sr.id AS saved_id, li.note, li.position_key,
+                r.canonical_key, r.name, r.web_url, r.provider_type, r.host
+         FROM list_items li
+         JOIN saved_repositories sr ON sr.id = li.saved_repository_id
+         JOIN repositories r ON r.id = sr.repository_id
+         WHERE sr.user_id = ?
+         ORDER BY li.position_key ASC`,
+      )
+      .all(userId) as unknown as ItemRow[]
+  ).filter((item) => visibleSavedIds.has(item.saved_id));
   const itemsByList = new Map<string, ItemRow[]>();
   for (const item of itemRows) {
     const list = itemsByList.get(item.list_id) ?? [];

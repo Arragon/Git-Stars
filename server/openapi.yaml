@@ -152,10 +152,36 @@ paths:
         - { name: provider, in: path, required: true, schema: { type: string } }
       responses:
         "200":
-          description: Structured SyncResult (counts, cursor state)
+          description: >-
+            Structured sync result. `completion` is `complete` only when the source
+            was exhausted; `partial` means progress was committed and `resume` lists
+            the next page per resource kind (M7-05 / INH-1703). `status` mirrors it.
           content:
             application/json:
-              schema: { type: object, additionalProperties: true }
+              schema:
+                type: object
+                required: [status, provider, completion, pagesFetched]
+                properties:
+                  status: { type: string, enum: [success, partial] }
+                  provider: { type: string }
+                  completion: { type: string, enum: [complete, partial] }
+                  pagesFetched: { type: integer, minimum: 0 }
+                  resume:
+                    type: array
+                    items:
+                      type: object
+                      required: [kind, page]
+                      properties:
+                        kind: { type: string, enum: [star, fork] }
+                        page: { type: integer, minimum: 2 }
+                  startedAt: { type: string, format: date-time }
+                  completedAt: { type: string, format: date-time }
+                  counts: { type: object, additionalProperties: true }
+                  inserted: { type: object, additionalProperties: true }
+                  fetched: { type: object, additionalProperties: true }
+                  code: { type: string }
+                  message: { type: string }
+                  resetAt: { type: integer }
         "429": { $ref: "#/components/responses/Error429" }
         "501": { $ref: "#/components/responses/Error501" }
         "502": { $ref: "#/components/responses/Error502" }

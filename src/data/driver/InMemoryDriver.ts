@@ -32,6 +32,7 @@ export class InMemoryDriver implements LocalStoreDriver {
       "syncCursor",
       "mutationQueue",
       "conflictLog",
+      "idMap",
       "schemaMeta",
     ];
     for (const s of allStores) {
@@ -142,7 +143,9 @@ export class InMemoryDriver implements LocalStoreDriver {
     if (s) s.clear();
   }
 
-  async clearUserState(): Promise<void> {
+  async clearUserState(
+    options: { includeQueue?: boolean } = {},
+  ): Promise<void> {
     const stores: StoreName[] = [
       "savedRepositories",
       "tags",
@@ -151,8 +154,11 @@ export class InMemoryDriver implements LocalStoreDriver {
       "listItems",
       "preferences",
       "syncCursor",
-      "mutationQueue",
+      "conflictLog",
     ];
+    if (options.includeQueue) {
+      stores.push("mutationQueue", "idMap");
+    }
     for (const name of stores) {
       const s = this.stores.get(name);
       if (s) s.clear();
@@ -177,6 +183,8 @@ export class InMemoryDriver implements LocalStoreDriver {
       case "repositoryTags":
         // Compound key: [savedRepositoryId, tagId]
         return `${obj.savedRepositoryId}:${obj.tagId}`;
+      case "idMap":
+        return obj.tempId as Key;
       default:
         return obj.id as Key;
     }

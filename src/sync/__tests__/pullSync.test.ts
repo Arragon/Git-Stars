@@ -442,7 +442,16 @@ describe("pullSync", () => {
     expect(srs1).toEqual(srs2);
     expect(lists1).toEqual(lists2);
     expect(items1).toEqual(items2);
-    expect(cursor1).toEqual(cursor2);
+    // lastSyncedAt is a wall-clock stamp; two pulls legitimately differ by a few ms.
+    const stableCursor = (cursor: typeof cursor1) =>
+      cursor
+        ? {
+            id: cursor.id,
+            lastSeq: cursor.lastSeq,
+            protocolVersion: cursor.protocolVersion,
+          }
+        : cursor;
+    expect(stableCursor(cursor1)).toEqual(stableCursor(cursor2));
   });
 
   // 8. sync() smart: bootstrap if no cursor, incremental if cursor exists

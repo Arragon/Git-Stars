@@ -37,7 +37,8 @@ import type {
   StoreName,
   TransactionContext,
 } from "./types";
-import { mutationQueue, buildIfMatch } from "../sync/syncClient";
+import { mutationQueue, conflictLog, buildIfMatch } from "../sync/syncClient";
+import { createIdResolver } from "../sync/idMap";
 import { ApiError, apiDelete, apiPut, apiPost } from "../utils/api";
 import type {
   ListDetail,
@@ -50,6 +51,9 @@ import type {
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
 
 // --- helpers -------------------------------------------------------------
+
+// Temp-id resolution is shared with push replay; both paths read the persisted map.
+const idResolver = createIdResolver(localStore);
 
 const PENDING_PREFIX = "pending:";
 
@@ -95,6 +99,12 @@ interface AttemptSpec<T> {
   attempt: (queueId: string) => Promise<T>;
   /** Cache repair after a confirmed server response. */
   onSuccess?: (response: T) => Promise<void> | void;
+  /** Temp id created by this mutation (recorded in `idMap` on ACK). */
+  createsTempId?: string;
+  /** Temp ids the payload depends on; unresolved ones defer the live attempt. */
+  refs?: string[];
+  /** Extract the authoritative id from a create response (defaults to `response.id`). */
+  serverId?: (response: T) => string | undefined;
 }
 
 async function enqueueAndAttempt<T>(
@@ -118,6 +128,8 @@ async function enqueueAndAttempt<T>(
         createdAt: nowIso(),
         retryCount: 0,
         status: "pending",
+        ...(spec.createsTempId ? { createsTempId: spec.createsTempId } : {}),
+        ...(spec.refs && spec.refs.length > 0 ? { refs: spec.refs } : {}),
       };
       tx.put<QueuedMutation>("mutationQueue", entry);
     },
@@ -134,8 +146,36 @@ async function enqueueAndAttempt<T>(
   // 2. Online attempt with the same idempotency key.
   if (!isOnline()) return applied;
 
+  // A dependent mutation cannot be sent before the entity it references has a server id
+  // (M7-04). Staying pending is safe: replay resolves the map once the create is ACKed.
+  const refs = spec.refs ?? [];
+  if (refs.length > 0) {
+    const resolved = await idResolver.resolveRefs(refs);
+    if (refs.some((ref) => !resolved.has(ref))) return applied;
+  }
+
   try {
     const response = await spec.attempt(queueId);
+    if (spec.createsTempId) {
+      const withId = response as {
+        id?: string;
+        version?: number;
+        etag?: string;
+      };
+      const serverId = spec.serverId?.(response) ?? withId?.id;
+      if (serverId && serverId !== spec.createsTempId) {
+        // Persist BEFORE completing/deleting the optimistic row: dependents and a later
+        // restart both rely on this mapping.
+        await idResolver.record({
+          tempId: spec.createsTempId,
+          entity: spec.entity,
+          serverId,
+          version: Number(withId.version ?? 1),
+          etag: withId.etag,
+          createdAt: nowIso(),
+        });
+      }
+    }
     await mutationQueue.complete(queueId);
     await spec.onSuccess?.(response);
     refreshCounts();
@@ -145,6 +185,20 @@ async function enqueueAndAttempt<T>(
       // Permanent failure (validation / missing entity): drop the entry.
       await mutationQueue.complete(queueId);
       refreshCounts();
+    } else if (err instanceof ApiError && err.status === 409) {
+      // The mutation stays queued for replay, but the conflict must be visible in the
+      // sync drawer immediately — the online path previously recorded nothing (M7-14).
+      const details = err.details as
+        { current?: Record<string, unknown>; etag?: string } | undefined;
+      await conflictLog.record({
+        entityType: spec.entity,
+        entityId: spec.entityId,
+        operation: spec.operation,
+        baseVersion: spec.baseVersion,
+        serverVersion: Number(details?.current?.version ?? 0),
+        localPayload: spec.payload,
+        serverSnapshot: details?.current ?? details?.etag ?? details,
+      });
     }
     // Everything else stays pending for replay on reconnect.
     return { ...applied, error: err };
@@ -635,6 +689,7 @@ export function saveRepositoryFromLibrary(repositoryId: string) {
     baseVersion: 0,
     payload: { repositoryId },
     stores: ["savedRepositories"],
+    createsTempId: entityId,
     optimistic: (tx) => {
       tx.put<CachedSavedRepository>("savedRepositories", {
         id: entityId,
@@ -783,6 +838,7 @@ export function createListOffline(name: string, description = "") {
     baseVersion: 0,
     payload: { name, description },
     stores: ["lists"],
+    createsTempId: entityId,
     optimistic: (tx) => {
       tx.put<CachedList>("lists", {
         id: entityId,
@@ -803,6 +859,17 @@ export function createListOffline(name: string, description = "") {
     onSuccess: async (res) => {
       await upsertListSummaries([res]);
       if (res.id !== entityId) {
+        // Re-key optimistic list items before dropping the temp list row, so the UI
+        // keeps showing queued memberships under the server id (M7-04).
+        const items = await localStore.getAll<CachedListItem>("listItems");
+        for (const item of items) {
+          if (item.listId === entityId) {
+            await localStore.put<CachedListItem>("listItems", {
+              ...item,
+              listId: res.id,
+            });
+          }
+        }
         await localStore.delete("lists", entityId);
       }
     },
@@ -880,6 +947,10 @@ export function addListItemOffline(listId: string, savedRepositoryId: string) {
     baseVersion: 0,
     payload: { list_id: listId, saved_repository_id: savedRepositoryId },
     stores: ["listItems"],
+    // Only unresolved temp ids defer the send; ordinary ids need no mapping.
+    refs: [listId, savedRepositoryId].filter((id) =>
+      id.startsWith(PENDING_PREFIX),
+    ),
     optimistic: async (tx) => {
       const items = await tx.getAll<CachedListItem>("listItems");
       const inList = items.filter((i) => i.listId === listId);
@@ -911,6 +982,44 @@ export function addListItemOffline(listId: string, savedRepositoryId: string) {
   });
 }
 
+/** Edit the per-list usage note for one item (list_items.note) — M7-12. */
+export function updateListItemNote(
+  item: { listId: string; savedRepositoryId: string },
+  note: string,
+) {
+  const entityId = `${item.listId}:${item.savedRepositoryId}`;
+  return enqueueAndAttempt<ListDetail>({
+    entity: "list_item",
+    operation: "update",
+    entityId,
+    baseVersion: 0,
+    payload: {
+      list_id: item.listId,
+      saved_repository_id: item.savedRepositoryId,
+      note,
+    },
+    stores: ["listItems"],
+    optimistic: async (tx) => {
+      const items = await tx.getAll<CachedListItem>("listItems");
+      for (const row of items) {
+        if (
+          row.listId === item.listId &&
+          row.savedRepositoryId === item.savedRepositoryId
+        ) {
+          tx.put<CachedListItem>("listItems", { ...row, note });
+        }
+      }
+    },
+    attempt: (key) =>
+      apiPut<ListDetail>(
+        `/api/lists/${item.listId}/items`,
+        { notes: [{ savedRepositoryId: item.savedRepositoryId, note }] },
+        { headers: { "Idempotency-Key": key } },
+      ),
+    onSuccess: (res) => upsertListDetail(res),
+  });
+}
+
 /** Remove a saved repository from a list. */
 export function removeListItemOffline(
   listId: string,
@@ -924,6 +1033,10 @@ export function removeListItemOffline(
     baseVersion: 0,
     payload: { list_id: listId, saved_repository_id: savedRepositoryId },
     stores: ["listItems"],
+    // Only unresolved temp ids defer the send; ordinary ids need no mapping.
+    refs: [listId, savedRepositoryId].filter((id) =>
+      id.startsWith(PENDING_PREFIX),
+    ),
     optimistic: async (tx) => {
       const items = await tx.getAll<CachedListItem>("listItems");
       for (const item of items) {

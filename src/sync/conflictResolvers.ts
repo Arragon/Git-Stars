@@ -12,8 +12,31 @@ export type ResolutionAction =
 
 // --- Individual entity resolvers ---
 
+// Fields each entity may merge from server state / local payload. Never spread the whole
+// server object: it may contain ids/versions and (for legacy 409 payloads) even a string
+// (M7-14 / INH-1708).
+const SAVED_FIELDS = ["note", "status", "aiSummary", "aiTags"] as const;
+const LIST_FIELDS = ["name", "description"] as const;
+
+function mergeBusinessFields(
+  serverCurrent: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  fields: readonly string[],
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (serverCurrent[field] !== undefined)
+      merged[field] = serverCurrent[field];
+  }
+  // Local edits win per field (LWW).
+  for (const field of fields) {
+    if (payload[field] !== undefined) merged[field] = payload[field];
+  }
+  return merged;
+}
+
 /**
- * SavedRepository: LWW — re-apply local fields onto server current.
+ * SavedRepository: LWW — re-apply local business fields onto server current.
  * Local payload fields override server fields (last-writer-wins per field).
  */
 export function resolveSavedRepository(
@@ -23,8 +46,7 @@ export function resolveSavedRepository(
   const payload = localPending.payload as Record<string, unknown>;
   if (!payload) return { action: "drop" };
 
-  // Merge local fields onto server current.
-  const merged = { ...serverCurrent, ...payload };
+  const merged = mergeBusinessFields(serverCurrent, payload, SAVED_FIELDS);
   const serverVersion = Number(serverCurrent.version ?? 1);
 
   return {
@@ -44,7 +66,7 @@ export function resolveList(
   const payload = localPending.payload as Record<string, unknown>;
   if (!payload) return { action: "drop" };
 
-  const merged = { ...serverCurrent, ...payload };
+  const merged = mergeBusinessFields(serverCurrent, payload, LIST_FIELDS);
   const serverVersion = Number(serverCurrent.version ?? 1);
 
   return {

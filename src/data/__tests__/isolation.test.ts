@@ -137,6 +137,50 @@ function runIsolationSuite(
       const cursor = await driver.get("syncCursor", "default");
       expect(cursor).toBeUndefined();
     });
+
+    it("clearUserState preserves the mutation queue and id map by default (M7-03)", async () => {
+      await driver.put("mutationQueue", {
+        id: "m1",
+        entity: "saved_repository",
+        operation: "update",
+        entityId: "s1",
+        baseVersion: 1,
+        payload: { note: "draft" },
+        createdAt: new Date().toISOString(),
+        retryCount: 0,
+        status: "pending",
+      });
+      await driver.put("idMap", {
+        tempId: "pending:l1",
+        entity: "list",
+        serverId: "l1",
+        version: 1,
+        createdAt: new Date().toISOString(),
+      });
+
+      await driver.clearUserState();
+
+      expect(await driver.getAll("mutationQueue")).toHaveLength(1);
+      expect(await driver.getAll("idMap")).toHaveLength(1);
+    });
+
+    it("clearUserState({includeQueue}) wipes the queue too (account deletion)", async () => {
+      await driver.put("mutationQueue", {
+        id: "m1",
+        entity: "saved_repository",
+        operation: "update",
+        entityId: "s1",
+        baseVersion: 1,
+        payload: {},
+        createdAt: new Date().toISOString(),
+        retryCount: 0,
+        status: "pending",
+      });
+
+      await driver.clearUserState({ includeQueue: true });
+
+      expect(await driver.getAll("mutationQueue")).toHaveLength(0);
+    });
   });
 }
 

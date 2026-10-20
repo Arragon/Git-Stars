@@ -105,14 +105,18 @@ describe("List export/import round-trip (INH-384/402/515)", () => {
     db.prepare(
       `INSERT INTO repository_tags (tag_id, saved_repository_id, created_at) VALUES (?, ?, '2026-01-01')`,
     ).run(tagId, s1);
-    [
-      [s1, 0],
-      [sPriv, 1],
-      [sGl, 2],
-    ].forEach(([savedId, pos]) => {
+    // position_key is deliberately NOT insertion order: reads/exports must follow it.
+    const rows: Array<[string, number, string, string]> = [
+      [s1, 0, "c", "framework we use"],
+      [sPriv, 1, "a", "private usage"],
+      [sGl, 2, "b", "gitlab mirror"],
+    ];
+    rows.forEach(([savedId, pos, key, itemNote]) => {
       db.prepare(
-        `INSERT INTO list_items (id, list_id, saved_repository_id, position, version, created_at, updated_at) VALUES (?, ?, ?, ?, 1, '2026-01-01', '2026-01-01')`,
-      ).run(randomUUID(), listId, savedId as string, pos as number);
+        `INSERT INTO list_items
+           (id, list_id, saved_repository_id, position, position_key, note, version, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, '2026-01-01', '2026-01-01')`,
+      ).run(randomUUID(), listId, savedId, pos, key, itemNote);
     });
     return listId;
   }
@@ -140,6 +144,62 @@ describe("List export/import round-trip (INH-384/402/515)", () => {
     ]) {
       expect(raw).not.toContain(forbidden);
     }
+  });
+
+  it("conserves list order and both note kinds across a round trip (M7-12)", () => {
+    const doc = exportList("u1", buildList())!;
+    // Order follows position_key: b (gitlab) then c (github); private is excluded.
+    expect(doc.items.map((i) => i.source.remote_id)).toEqual(["77", "1"]);
+    expect(doc.items[0].listNote).toBe("gitlab mirror");
+    expect(doc.items[1].note).toBe("great framework");
+    expect(doc.items[1].listNote).toBe("framework we use");
+    expect(doc.schema_version).toBe(1);
+
+    const result = importCommit("u2", JSON.stringify(doc));
+    expect(result.ok).toBe(true);
+
+    const rows = db
+      .prepare(
+        `SELECT r.remote_id AS remote_id, li.note AS item_note, sr.note AS repo_note
+         FROM list_items li
+         JOIN saved_repositories sr ON sr.id = li.saved_repository_id
+         JOIN repositories r ON r.id = sr.repository_id
+         WHERE li.list_id = ?
+         ORDER BY li.position_key ASC, li.position ASC`,
+      )
+      .all(result.listId!) as Array<{
+      remote_id: string;
+      item_note: string | null;
+      repo_note: string | null;
+    }>;
+    expect(rows.map((r) => r.remote_id)).toEqual(["77", "1"]);
+    expect(rows[1]).toMatchObject({
+      item_note: "framework we use",
+      repo_note: "great framework",
+    });
+  });
+
+  it("still imports v0 files (backward compatibility)", () => {
+    const v0 = {
+      format: "gitstars-list",
+      schema_version: 0,
+      title: "Old export",
+      items: [
+        {
+          source: {
+            provider: "github",
+            host: "github.com",
+            remote_id: "1",
+            path: "honojs/hono",
+          },
+          note: "legacy repo note",
+        },
+      ],
+    };
+    expect(importPreview("u2", JSON.stringify(v0)).ok).toBe(true);
+    const result = importCommit("u2", JSON.stringify(v0));
+    expect(result.ok).toBe(true);
+    expect(result.counts?.total).toBe(1);
   });
 
   it("previews an import without mutating, then commits idempotently", () => {

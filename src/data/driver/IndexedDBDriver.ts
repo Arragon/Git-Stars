@@ -268,9 +268,13 @@ export class IndexedDBDriver implements LocalStoreDriver {
     });
   }
 
-  async clearUserState(): Promise<void> {
+  async clearUserState(
+    options: { includeQueue?: boolean } = {},
+  ): Promise<void> {
     if (!this.db) throw new Error("Database not open.");
 
+    // The mutation queue and its id map are preserved by default: unsynced edits must
+    // survive sign-out and resume after the same account signs in again (M7-03).
     const stores: StoreName[] = [
       "savedRepositories",
       "tags",
@@ -279,8 +283,11 @@ export class IndexedDBDriver implements LocalStoreDriver {
       "listItems",
       "preferences",
       "syncCursor",
-      "mutationQueue",
+      "conflictLog",
     ];
+    if (options.includeQueue) {
+      stores.push("mutationQueue", "idMap");
+    }
 
     return new Promise<void>((resolve, reject) => {
       const tx = this.db!.transaction(stores, "readwrite");

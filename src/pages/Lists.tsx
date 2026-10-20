@@ -19,6 +19,7 @@ import {
   ArrowDown,
   ArrowUp,
   Download,
+  FileText,
   Folder,
   Lock,
   MoreHorizontal,
@@ -58,6 +59,7 @@ import {
   type SavedRepository,
 } from "../utils/gitstarsApi";
 import { ApiError, apiPut } from "../utils/api";
+import { updateListItemNote } from "../data/offlineMutations";
 import {
   addListItemOffline,
   createListOffline,
@@ -90,6 +92,12 @@ const isPublished = (p: PublicationView | null | undefined): boolean =>
 export const Lists: React.FC = () => {
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [selected, setSelected] = useState<ListDetail | null>(null);
+  // M7-12: per-list-item note (distinct from the repository-level note).
+  const [noteItem, setNoteItem] = useState<{
+    savedRepositoryId: string;
+    name: string;
+    note: string;
+  } | null>(null);
   const [library, setLibrary] = useState<SavedRepository[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -391,6 +399,27 @@ export const Lists: React.FC = () => {
       setError(msg(e));
       return lastResponse;
     }
+  };
+
+  /** Save the per-list usage note for one item (M7-12). */
+  const saveItemNote = async () => {
+    if (!selected || !noteItem) return;
+    const out = await runMutate(() =>
+      updateListItemNote(
+        {
+          listId: selected.id,
+          savedRepositoryId: noteItem.savedRepositoryId,
+        },
+        noteItem.note,
+      ),
+    );
+    if (out.error) {
+      setError(msg(out.error));
+      return;
+    }
+    await reloadLists();
+    showToast("列表内备注已保存");
+    setNoteItem(null);
   };
 
   /** Remove one item with an undo toast (undo re-adds via apiPut). */
@@ -1020,6 +1049,23 @@ export const Lists: React.FC = () => {
                           <button
                             type="button"
                             className="btn icon ghost"
+                            aria-label="编辑列表内备注"
+                            title={
+                              item.note ? "编辑列表内备注" : "添加列表内备注"
+                            }
+                            onClick={() =>
+                              setNoteItem({
+                                savedRepositoryId: item.savedRepositoryId,
+                                name: item.repository.name,
+                                note: item.note ?? "",
+                              })
+                            }
+                          >
+                            <FileText className="ico small" />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn icon ghost"
                             aria-label="移出当前列表"
                             title="移出当前列表"
                             onClick={() =>
@@ -1054,6 +1100,43 @@ export const Lists: React.FC = () => {
           </section>
         </div>
       )}
+
+      {/* Per-list-item note (M7-12) */}
+      <Dialog
+        open={noteItem !== null}
+        onClose={() => setNoteItem(null)}
+        title={noteItem ? `列表内备注 · ${noteItem.name}` : "列表内备注"}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => setNoteItem(null)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => void saveItemNote()}
+            >
+              保存
+            </button>
+          </>
+        }
+      >
+        <p className="muted small">
+          这是该仓库在此列表中的用途备注，与全库通用的「个人备注」相互独立。
+        </p>
+        <textarea
+          className="field"
+          aria-label="列表内备注"
+          value={noteItem?.note ?? ""}
+          onChange={(e) =>
+            setNoteItem((n) => (n ? { ...n, note: e.target.value } : n))
+          }
+        />
+      </Dialog>
 
       {/* Create / edit dialog (prototype `createListDialog`) */}
       <Dialog

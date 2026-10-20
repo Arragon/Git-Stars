@@ -112,6 +112,23 @@ export interface QueuedMutation {
   retryCount: number;
   lastError?: string;
   status: MutationStatus;
+  /** Temp id this mutation creates (e.g. `pending:<uuid>` for an offline list). */
+  createsTempId?: string;
+  /** Temp ids referenced by the payload; resolved through `idMap` before sending. */
+  refs?: string[];
+}
+
+/**
+ * Temp id -> server id mapping (M7-04 / INH-1702). Persisted so a create ACK survives
+ * restarts and dependent mutations can be rewritten to the authoritative id.
+ */
+export interface IdMapEntry {
+  tempId: string;
+  entity: MutationEntity;
+  serverId: string;
+  version: number;
+  etag?: string;
+  createdAt: string;
 }
 
 // --- Store names ---
@@ -127,6 +144,7 @@ export type StoreName =
   | "syncCursor"
   | "mutationQueue"
   | "conflictLog"
+  | "idMap"
   | "schemaMeta";
 
 // --- Driver contract ---
@@ -156,7 +174,12 @@ export interface LocalStoreDriver {
     fn: (tx: TransactionContext) => Promise<T>,
   ): Promise<T>;
   clearRepositoryCache(): Promise<void>;
-  clearUserState(): Promise<void>;
+  /**
+   * Clear cached user state. By default the pending mutation queue and its temp-id map
+   * are PRESERVED so offline edits survive a sign-out (M7-03); pass `includeQueue` to
+   * wipe them too (account deletion / explicit discard).
+   */
+  clearUserState(options?: { includeQueue?: boolean }): Promise<void>;
 }
 
 // --- Error classes ---

@@ -66,6 +66,12 @@ import {
   Textarea,
 } from "../components/ui";
 import { useToastStore } from "../store/useToastStore";
+import {
+  groupOpsByList,
+  initialDesired,
+  planMembershipOps,
+  type TriState,
+} from "../utils/membership";
 
 const resultKey = (r: SearchItemView): string =>
   `${r.identity.providerType}:${r.identity.remoteId}`;
@@ -166,9 +172,14 @@ export const Library: React.FC = () => {
     new Map(),
   );
   const [membershipFor, setMembershipFor] = useState<string[] | null>(null);
-  const [membershipChecked, setMembershipChecked] = useState<Set<string>>(
-    new Set(),
-  );
+  // M7-02: desired state per list (on/off/mixed) initialized from real membership.
+  const [membershipDesired, setMembershipDesired] = useState<
+    Map<string, TriState>
+  >(new Map());
+  const [membershipAddOnly, setMembershipAddOnly] = useState(false);
+  const [membershipResults, setMembershipResults] = useState<
+    Map<string, "ok" | "failed">
+  >(new Map());
   const [listToggleBusy, setListToggleBusy] = useState(false);
 
   // Batch AI
@@ -261,8 +272,10 @@ export const Library: React.FC = () => {
         }
       }
       setMemberships(map);
+      return { map, summaries };
     } catch {
       setLists([]);
+      return { map: new Map<string, Set<string>>(), summaries: [] };
     }
   }, []);
 
@@ -356,32 +369,69 @@ export const Library: React.FC = () => {
     setSavingKey(null);
   };
 
+  /**
+   * Open the membership picker from the CURRENT server/cache membership (M7-02).
+   * Previously the dialog always opened unchecked, so saving it removed every list.
+   */
+  const openMembership = async (ids: string[]) => {
+    const { map, summaries } = await loadLists();
+    setMembershipDesired(
+      initialDesired(
+        map,
+        ids,
+        summaries.map((l) => l.id),
+      ),
+    );
+    setMembershipAddOnly(false);
+    setMembershipResults(new Map());
+    setMembershipFor(ids);
+  };
+
   const saveMembership = async () => {
     if (!membershipFor || listToggleBusy) return;
+    const ops = planMembershipOps({
+      memberships,
+      savedIds: membershipFor,
+      desired: membershipDesired,
+      addOnly: membershipAddOnly,
+    });
+    if (ops.length === 0) {
+      showToast("没有需要保存的变更");
+      setMembershipFor(null);
+      return;
+    }
+
     setListToggleBusy(true);
     setError("");
-    try {
-      for (const list of lists) {
-        const checked = membershipChecked.has(list.id);
-        for (const savedId of membershipFor) {
-          const member = memberships.get(savedId)?.has(list.id);
-          if (checked === member) continue;
-          await apiPut(
-            `/api/lists/${list.id}/items`,
-            member ? { remove: [savedId] } : { add: [savedId] },
-          );
-        }
+    const groups = groupOpsByList(ops);
+    const results = new Map<string, "ok" | "failed">();
+
+    // One request per affected list; a failure does not abort the others, and the
+    // dialog stays open so the user can retry exactly the failed lists.
+    for (const group of groups) {
+      try {
+        await apiPut(`/api/lists/${group.listId}/items`, {
+          ...(group.add.length > 0 ? { add: group.add } : {}),
+          ...(group.remove.length > 0 ? { remove: group.remove } : {}),
+        });
+        results.set(group.listId, "ok");
+      } catch {
+        results.set(group.listId, "failed");
       }
-      await loadLists();
-      showToast("列表归属已更新");
-      setMembershipFor(null);
-    } catch (e) {
-      setError(
-        e instanceof ApiError ? `${e.code}: ${e.message}` : "操作失败，请重试",
-      );
-    } finally {
-      setListToggleBusy(false);
     }
+    setMembershipResults(results);
+
+    const failed = [...results.values()].filter((v) => v === "failed").length;
+    await loadLists();
+    if (failed === 0) {
+      showToast(
+        `列表归属已更新（${groups.length} 个列表，${ops.length} 项变更）`,
+      );
+      setMembershipFor(null);
+    } else {
+      setError(`${failed} 个列表更新失败，可直接再次点击保存重试`);
+    }
+    setListToggleBusy(false);
   };
 
   // --- Batch AI summarize ---
@@ -686,29 +736,48 @@ export const Library: React.FC = () => {
         }
       >
         <p className="text-xs text-muted mb-4">
-          一个仓库可以属于多个列表。这里的快捷加入操作需要联网。
+          勾选状态来自当前真实归属，保存时只提交你改动的部分；此操作需要联网。
         </p>
+        <label className="row mb-4" style={{ gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={membershipAddOnly}
+            onChange={(e) => setMembershipAddOnly(e.target.checked)}
+          />
+          <span className="small">仅添加（不移除任何已有归属）</span>
+        </label>
         <div className="check-list">
           {lists.map((l) => {
-            const allIn =
-              membershipFor?.length &&
-              membershipFor.every((id) => memberships.get(id)?.has(l.id));
-            const checked = membershipChecked.has(l.id) ?? !!allIn;
+            const state = membershipDesired.get(l.id) ?? "off";
+            const result = membershipResults.get(l.id);
             return (
               <label key={l.id}>
                 <input
                   type="checkbox"
-                  checked={checked}
-                  onChange={(e) => {
-                    setMembershipChecked((prev) => {
-                      const next = new Set(prev);
-                      if (e.target.checked) next.add(l.id);
-                      else next.delete(l.id);
-                      return next;
-                    });
+                  checked={state === "on"}
+                  ref={(el) => {
+                    if (el) el.indeterminate = state === "mixed";
                   }}
+                  onChange={() =>
+                    setMembershipDesired((prev) => {
+                      const next = new Map(prev);
+                      next.set(l.id, state === "on" ? "off" : "on");
+                      return next;
+                    })
+                  }
                 />
                 <span>{l.name}</span>
+                {state === "mixed" && (
+                  <span className="muted tiny">部分已加入</span>
+                )}
+                {result === "failed" && (
+                  <span
+                    className="tiny"
+                    style={{ color: "var(--danger, #c0392b)" }}
+                  >
+                    失败
+                  </span>
+                )}
                 <span className="muted tiny number">{l.itemCount}</span>
               </label>
             );
@@ -1147,8 +1216,7 @@ export const Library: React.FC = () => {
                               : "加入列表"
                         }
                         onClick={() => {
-                          setMembershipChecked(new Set());
-                          setMembershipFor([it.id]);
+                          void openMembership([it.id]);
                         }}
                       >
                         <FolderGlyphSmall />
@@ -1253,8 +1321,7 @@ export const Library: React.FC = () => {
                         aria-label="加入列表"
                         disabled={offline}
                         onClick={() => {
-                          setMembershipChecked(new Set());
-                          setMembershipFor([it.id]);
+                          void openMembership([it.id]);
                         }}
                       >
                         <FolderGlyphSmall />
@@ -1285,8 +1352,7 @@ export const Library: React.FC = () => {
             size="sm"
             disabled={offline}
             onClick={() => {
-              setMembershipChecked(new Set());
-              setMembershipFor(Array.from(selected));
+              void openMembership(Array.from(selected));
             }}
           >
             加入列表

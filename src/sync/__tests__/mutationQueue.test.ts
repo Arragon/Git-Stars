@@ -148,4 +148,18 @@ describe("MutationQueue", () => {
       expect(pending[0].id).toBe(id2);
     });
   });
+
+  describe("getAll / countAll (M7-03 sign-out guard)", () => {
+    it("counts pending and quarantined separately", async () => {
+      const id1 = await queue.enqueue(baseMutation);
+      const id2 = await queue.enqueue({ ...baseMutation, entityId: "sr-2" });
+      await queue.quarantine(id2, "failed");
+
+      const counts = await queue.countAll();
+      expect(counts).toEqual({ pending: 1, quarantined: 1, total: 2 });
+      expect((await queue.getAll()).map((m) => m.id).sort()).toEqual(
+        [id1, id2].sort(),
+      );
+    });
+  });
 });
