@@ -269,6 +269,15 @@ export interface SearchItemView {
   description: string | null;
   starsCount: number;
 }
+export interface ResolveRepositoryResponse {
+  repositoryId: string;
+  repository: RepositoryDetailView | null;
+}
+
+/** Resolve a pasted GitHub URL (or owner/repo) into a cached repository (M8-02). */
+export const resolveRepositoryUrl = (url: string) =>
+  apiPost<ResolveRepositoryResponse>("/api/repositories/resolve", { url });
+
 export const searchRepositories = (q: string, provider = "github") =>
   apiGet<{ items: SearchItemView[]; total?: number }>(
     `/api/discover/search?q=${encodeURIComponent(q)}&provider=${encodeURIComponent(provider)}`,

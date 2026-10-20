@@ -24,6 +24,7 @@ import {
   listLibrary,
   listLists,
   listTags,
+  resolveRepositoryUrl,
   searchRepositories,
   syncProvider,
   updateSaved,
@@ -157,6 +158,8 @@ export const Library: React.FC = () => {
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
+  const [resolvingUrl, setResolvingUrl] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [noteFor, setNoteFor] = useState<SavedRepository | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -367,6 +370,34 @@ export const Library: React.FC = () => {
       setNotice("离线：更改已保存到本地，联网后自动同步");
     else await reload();
     setSavingKey(null);
+  };
+
+  /** Resolve a pasted GitHub URL and save it in one step (M8-02). */
+  const onResolveUrl = async () => {
+    const value = urlInput.trim();
+    if (!value || resolvingUrl) return;
+    setResolvingUrl(true);
+    setError("");
+    try {
+      const res = await resolveRepositoryUrl(value);
+      if (!res.repository) throw new Error("resolve failed");
+      if (!res.repository.saved) {
+        const out = await saveRepositoryFromLibrary(res.repositoryId);
+        if (out.error) throw out.error;
+      }
+      setDiscoverOpen(false);
+      setUrlInput("");
+      await reload();
+      showToast("已加入收藏库");
+    } catch (e) {
+      setError(
+        e instanceof ApiError
+          ? `${e.code}: ${e.message}`
+          : "无法解析该链接，请检查后重试",
+      );
+    } finally {
+      setResolvingUrl(false);
+    }
   };
 
   /**
@@ -642,9 +673,26 @@ export const Library: React.FC = () => {
         width="560px"
       >
         <p className="text-xs text-muted mb-4">
-          这里搜索来源平台。收藏库顶部的搜索只检索已经保存的内容。
+          粘贴 GitHub 链接可直接保存；按关键词搜索会查询来源平台。收藏库顶部的搜索只检索已经保存的内容。
         </p>
         <div className="row">
+          <Input
+            placeholder="粘贴链接，如 https://github.com/honojs/hono"
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void onResolveUrl();
+            }}
+          />
+          <Button
+            variant="secondary"
+            disabled={!isOnline || resolvingUrl}
+            onClick={() => void onResolveUrl()}
+          >
+            {resolvingUrl ? "解析中…" : "从链接添加"}
+          </Button>
+        </div>
+        <div className="row mt-4">
           <Input
             placeholder="搜索关键词，如 backend"
             value={query}

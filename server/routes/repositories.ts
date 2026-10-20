@@ -6,9 +6,13 @@ import {
 } from "../middleware/auth.js";
 import {
   getRepositoryView,
+  loadContext,
   refreshRepository,
   repositoryReader,
+  upsertRepositoryFromSnapshot,
 } from "../services/repository.js";
+import { getProvider } from "../providers/registry.js";
+import { parseRepositoryUrl } from "../lib/repositoryUrl.js";
 import { providerErrorToHttp, apiError } from "../httpErrors.js";
 
 // Repository View API (ADR-0006 D1). Metadata is served from the cache; README/tree/file/
@@ -32,6 +36,47 @@ function guard(
       return apiError(c, 500, "INTERNAL_ERROR", "Unexpected error");
     });
 }
+
+// Resolve a pasted URL/owner-repo into a cached repository (M8-02). Private or missing
+// repositories return the same 404 so existence is not leaked.
+repositoryRoutes.post("/resolve", (c) =>
+  guard(c, async () => {
+    const userId = c.get("userId");
+    let body: { url?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION", "Request body must be JSON");
+    }
+    const parsed = parseRepositoryUrl(body?.url);
+    if (!parsed) {
+      return apiError(
+        c,
+        400,
+        "VALIDATION",
+        "Unsupported repository URL (expected a GitHub repository link)",
+      );
+    }
+    const provider = getProvider(parsed.providerType);
+    if (!provider?.resolveRepository) {
+      return apiError(
+        c,
+        501,
+        "PROVIDER_NOT_IMPLEMENTED",
+        `${parsed.providerType} cannot resolve repository URLs`,
+      );
+    }
+    const snapshot = await provider.resolveRepository(
+      parsed.path,
+      loadContext(userId, parsed.providerType),
+    );
+    const repositoryId = upsertRepositoryFromSnapshot(snapshot);
+    return c.json({
+      repositoryId,
+      repository: getRepositoryView(repositoryId, userId),
+    });
+  }),
+);
 
 repositoryRoutes.get("/:id", (c) =>
   guard(c, async () => {

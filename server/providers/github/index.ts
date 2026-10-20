@@ -188,6 +188,21 @@ export const githubProvider: RepositoryProvider = {
     return normalize(res.data as GhRepo);
   },
 
+  async resolveRepository(path, ctx) {
+    const normalized = path.replace(/^\/+|\/+$/g, "");
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalized)) {
+      throw new ProviderError("NOT_FOUND", "Repository not found", {
+        status: 404,
+      });
+    }
+    const res = await dedupe(
+      `gh:resolve:${credentialScope(ctx)}:${normalized.toLowerCase()}`,
+      () => httpJson(`${API}/repos/${normalized}`, { token: ctx.token }),
+    );
+    assertOk(res, "Repository");
+    return normalize(res.data as GhRepo);
+  },
+
   async listMemberships(ctx, kind: MembershipKind, cursor) {
     if (kind !== "star" && kind !== "fork")
       return { items: [], nextCursor: null };

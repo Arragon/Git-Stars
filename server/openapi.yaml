@@ -221,6 +221,34 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /repositories/resolve:
+    post:
+      tags: [repositories]
+      summary: Resolve a pasted GitHub URL (or owner/repo) into a cached repository
+      description: >
+        Accepts a GitHub repository URL or `owner/repo` shorthand, resolves it through the
+        provider, upserts the metadata cache and returns the repository view. Private or
+        missing repositories return the same 404 so existence is not leaked (M8-02).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, maxLength: 2048 }
+      responses:
+        "200":
+          description: Resolved repository
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400": { $ref: "#/components/responses/Error400" }
+        "404": { $ref: "#/components/responses/Error404" }
+        "501": { $ref: "#/components/responses/Error501" }
   /repositories/{id}:
     get:
       tags: [repository]
