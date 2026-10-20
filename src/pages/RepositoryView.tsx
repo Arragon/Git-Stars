@@ -130,6 +130,15 @@ export const RepositoryView: React.FC = () => {
   const [releases, setReleases] = useState<ReleaseView[] | null>(null);
 
   /** Cache-first hydration of the saved/note/tags state (INH-406). */
+  // M8-05: A -> B navigation must never keep A's README/files/releases on screen.
+  useEffect(() => {
+    setReadme(null);
+    setEntries(null);
+    setFile(null);
+    setReleases(null);
+    setDirPath("");
+  }, [id]);
+
   const hydrate = useCallback(async () => {
     try {
       const cached = await readRepositorySavedCache(id);
@@ -573,7 +582,21 @@ export const RepositoryView: React.FC = () => {
               {readme ? (
                 <div
                   dangerouslySetInnerHTML={{
-                    __html: renderMarkdownSafe(readme),
+                    __html: renderMarkdownSafe(
+                      readme,
+                      repo
+                        ? {
+                            linkBase: `${repo.webUrl}/blob/HEAD/`,
+                            imageBase:
+                              repo.providerType === "github"
+                                ? `${repo.webUrl.replace(
+                                    "github.com",
+                                    "raw.githubusercontent.com",
+                                  )}/HEAD/`
+                                : `${repo.webUrl}/raw/HEAD/`,
+                          }
+                        : {},
+                    ),
                   }}
                 />
               ) : (
