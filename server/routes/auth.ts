@@ -23,10 +23,7 @@ import {
   SESSION_COOKIE_NAME,
 } from "../session.js";
 import { currentUser } from "../middleware/auth.js";
-import {
-  DEFAULT_RETURN_TO,
-  sanitizeReturnTo,
-} from "../lib/returnTo.js";
+import { DEFAULT_RETURN_TO, sanitizeReturnTo } from "../lib/returnTo.js";
 import { upsertProviderAccount } from "../services/credentials.js";
 
 const OAUTH_STATE_TTL_MS = 5 * 60 * 1000;
@@ -251,9 +248,7 @@ authRoutes.get("/github/callback", async (c) => {
     }
     if (error instanceof GitHubApiError) {
       return c.redirect(
-        withReturnTo(
-          `/?error=${encodeURIComponent(error.code.toLowerCase())}`,
-        ),
+        withReturnTo(`/?error=${encodeURIComponent(error.code.toLowerCase())}`),
         302,
       );
     }

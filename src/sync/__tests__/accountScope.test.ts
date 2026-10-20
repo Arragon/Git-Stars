@@ -49,7 +49,10 @@ describe("account-scoped mutation queue", () => {
     });
 
     expect((await queue.getPending()).map((m) => m.id)).toEqual(["legacy-1"]);
-    const claimed = await driver.get<QueuedMutation>("mutationQueue", "legacy-1");
+    const claimed = await driver.get<QueuedMutation>(
+      "mutationQueue",
+      "legacy-1",
+    );
     expect(claimed?.ownerId).toBe("user-a");
 
     scope = "user-b";
@@ -101,9 +104,9 @@ describe("account-scoped id map", () => {
       version: 1,
       createdAt: "2026-01-01T00:00:00.000Z",
     } satisfies IdMapEntry);
-    expect((await resolver.resolveRefs(["pending:legacy"])).get("pending:legacy")).toBe(
-      "server-legacy",
-    );
+    expect(
+      (await resolver.resolveRefs(["pending:legacy"])).get("pending:legacy"),
+    ).toBe("server-legacy");
     const claimed = await driver.get<IdMapEntry>("idMap", "pending:legacy");
     expect(claimed?.ownerId).toBe("user-b");
   });

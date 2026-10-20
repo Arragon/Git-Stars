@@ -673,7 +673,8 @@ export const Library: React.FC = () => {
         width="560px"
       >
         <p className="text-xs text-muted mb-4">
-          粘贴 GitHub 链接可直接保存；按关键词搜索会查询来源平台。收藏库顶部的搜索只检索已经保存的内容。
+          粘贴 GitHub
+          链接可直接保存；按关键词搜索会查询来源平台。收藏库顶部的搜索只检索已经保存的内容。
         </p>
         <div className="row">
           <Input

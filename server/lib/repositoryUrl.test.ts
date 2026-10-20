@@ -41,6 +41,8 @@ describe("parseRepositoryUrl (M8-02)", () => {
   it("rejects non-strings and overlong input", () => {
     expect(parseRepositoryUrl(undefined)).toBeNull();
     expect(parseRepositoryUrl(42)).toBeNull();
-    expect(parseRepositoryUrl(`https://github.com/${"a".repeat(3000)}/b`)).toBeNull();
+    expect(
+      parseRepositoryUrl(`https://github.com/${"a".repeat(3000)}/b`),
+    ).toBeNull();
   });
 });
