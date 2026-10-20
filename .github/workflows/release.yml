@@ -19,6 +19,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Gate scripts import server/env.ts, which requires SESSION_SECRET even for checks.
+    # A throwaway value is fine: nothing in this job serves real sessions.
+    env:
+      SESSION_SECRET: ci-check-only-not-a-real-secret
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,8 +60,6 @@ jobs:
       # M7-11: backup/restore/upgrade-rollback drill (checkpoint + file copy; see the
       # script header for the node:sqlite limitation). Gates the release on real evidence.
       - name: Backup / restore / rollback drill
-        env:
-          SESSION_SECRET: drill-only-not-a-real-secret
         run: npm run drill:backup
 
       - name: Package server deploy artifact
@@ -90,8 +92,6 @@ jobs:
       # M7-08: prove the artifact installs with production dependencies only. Runs after
       # upload so it cannot pollute checksums. SESSION_SECRET is required at startup.
       - name: Production install smoke
-        env:
-          SESSION_SECRET: smoke-only-not-a-real-secret
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           export EXPECTED_VERSION="$VERSION"
