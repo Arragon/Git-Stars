@@ -200,3 +200,74 @@ describe("collect/aggregate helpers", () => {
     expect(formatCount(56000)).toBe("56k");
   });
 });
+
+// M8-03: filtering is a pure derivation over the full snapshot. Online, offline and a
+// cache round-trip must therefore yield the SAME repository-id set for the same filters.
+describe("large-library filter consistency (M8-03)", () => {
+  function makeLibrary(count: number): SavedRepository[] {
+    const providers = ["github", "gitlab", "gitee"];
+    const languages = ["TypeScript", "Go", "Rust", "Python", "C"];
+    return Array.from({ length: count }, (_, i) => {
+      const provider = providers[i % providers.length];
+      return item({
+        id: `sr-${i}`,
+        addedAt: new Date(2026, 0, 1 + (i % 300)).toISOString(),
+        aiSummary: i % 3 === 0 ? `summary ${i}` : undefined,
+        kinds: i % 4 === 0 ? ["star", "fork"] : [i % 2 === 0 ? "star" : "fork"],
+        tags: i % 5 === 0 ? [{ id: `t-${i % 7}`, name: `tag-${i % 7}` }] : [],
+        repository: {
+          ...item().repository,
+          id: `repo-${i}`,
+          providerType: provider,
+          canonicalKey: `${provider}:${i}`,
+          name: `repo-${String(i).padStart(5, "0")}`,
+          primaryLanguage: languages[i % languages.length],
+          starsCount: (i * 37) % 10000,
+        },
+      });
+    });
+  }
+
+  function ids(items: SavedRepository[]): string[] {
+    return items.map((it) => it.repository.id);
+  }
+
+  for (const size of [1500, 5000]) {
+    it(`${size} items: online / cache-round-trip / filtered sets agree`, () => {
+      const library = makeLibrary(size);
+      // A cache round trip only preserves serializable fields; the projection must keep
+      // everything the filters read (aiSummary, kinds, tags, language).
+      const cached = JSON.parse(JSON.stringify(library)) as SavedRepository[];
+
+      expect(
+        ids(applyLibraryFilters(cached, EMPTY_LIBRARY_FILTERS)).sort(),
+      ).toEqual(
+        ids(applyLibraryFilters(library, EMPTY_LIBRARY_FILTERS)).sort(),
+      );
+
+      const filtered = {
+        ...EMPTY_LIBRARY_FILTERS,
+        provider: "github",
+        language: "Go",
+        kind: "fork" as const,
+      };
+      const online = ids(applyLibraryFilters(library, filtered)).sort();
+      const offline = ids(applyLibraryFilters(cached, filtered)).sort();
+      expect(offline).toEqual(online);
+      expect(online.length).toBeGreaterThan(0);
+      expect(online.length).toBeLessThan(size);
+    });
+  }
+
+  it("filters 5000 items well under an interaction budget", () => {
+    const library = makeLibrary(5000);
+    const started = performance.now();
+    applyLibraryFilters(library, {
+      ...EMPTY_LIBRARY_FILTERS,
+      provider: "github",
+    });
+    const elapsed = performance.now() - started;
+    // Generous bound: catches accidental O(n^2) or network-in-the-loop regressions.
+    expect(elapsed).toBeLessThan(500);
+  });
+});

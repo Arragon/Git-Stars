@@ -201,30 +201,33 @@ export const Library: React.FC = () => {
     (filters.tag ? 1 : 0) +
     filters.aiTags.length;
 
+  // One generation counter guards cache reads and server reloads: a slow response from
+  // an older request must never overwrite a newer snapshot (M8-03).
+  const cacheGen = useRef(0);
+
   const hydrateFromCache = useCallback(async () => {
+    const gen = ++cacheGen.current;
     try {
       const cache = await readLibraryCache();
+      if (gen !== cacheGen.current) return;
       setAllItems(cache.items);
-      setItems(applyLibraryFilters(cache.items, filters));
       setTags(cache.tags);
     } catch {
       // server fetch path still applies
     }
-  }, [filters]);
+  }, []);
 
+  // Fetch the FULL library snapshot once; provider/tag/sort are derived locally so
+  // filtering never turns into a server round-trip (M8-03).
   const reload = useCallback(async () => {
+    const gen = ++cacheGen.current;
     try {
       const [lib, tg] = await Promise.all([
-        listLibrary({
-          provider: filters.provider,
-          tag: filters.tag,
-          sort: filters.sort,
-          order: "desc",
-        }),
+        listLibrary({ order: "desc" }),
         listTags(),
       ]);
+      if (gen !== cacheGen.current) return;
       setAllItems(lib);
-      setItems(applyLibraryFilters(lib, filters));
       setTags(tg);
       setError("");
       setNotice("");
@@ -234,6 +237,7 @@ export const Library: React.FC = () => {
         // best-effort
       }
     } catch (e) {
+      if (gen !== cacheGen.current) return;
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         setNotice("离线：正在显示本地缓存");
         setError("");
@@ -246,7 +250,7 @@ export const Library: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [filters, hydrateFromCache]);
+  }, [hydrateFromCache]);
 
   useEffect(() => {
     if (mountedRef.current) return;
@@ -257,6 +261,11 @@ export const Library: React.FC = () => {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Derived visible set: pure local filter/sort over the snapshot.
+  useEffect(() => {
+    setItems(applyLibraryFilters(allItems, filters));
+  }, [allItems, filters]);
 
   const loadLists = useCallback(async () => {
     try {
@@ -324,15 +333,19 @@ export const Library: React.FC = () => {
     void mutate(fn).finally(() => setBusy(false));
   };
 
+  const searchGen = useRef(0);
+
   const onSearch = async () => {
     if (!query.trim()) {
       setResults(null);
       setSaveable(new Map());
       return;
     }
+    const gen = ++searchGen.current;
     setBusy(true);
     try {
       const r = await searchRepositories(query.trim());
+      if (gen !== searchGen.current) return;
       setResults(r.items);
       const map = new Map<string, string>();
       for (const item of r.items) {
@@ -346,13 +359,15 @@ export const Library: React.FC = () => {
           /* cache unavailable */
         }
       }
+      if (gen !== searchGen.current) return;
       setSaveable(map);
     } catch (e) {
+      if (gen !== searchGen.current) return;
       setError(
         e instanceof ApiError ? `${e.code}: ${e.message}` : "搜索失败，请重试",
       );
     } finally {
-      setBusy(false);
+      if (gen === searchGen.current) setBusy(false);
     }
   };
 

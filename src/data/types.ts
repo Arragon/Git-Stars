@@ -30,6 +30,9 @@ export interface CachedSavedRepository {
   repositoryId: string;
   status: string;
   note?: string;
+  /** Needed by offline filters/sorting (M8-03): previously dropped from the cache. */
+  aiSummary?: string;
+  kinds?: string[];
   aiTags: string[];
   version: number;
   etag: string;
