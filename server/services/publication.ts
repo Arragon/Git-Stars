@@ -157,9 +157,14 @@ export interface PublicationView {
   updatedAt: string;
   shareUrl: string;
   hubOptIn: boolean;
+  /** True when the list changed after the published snapshot (M8-12). */
+  hasUnpublishedChanges: boolean;
 }
 
-export function serializePublication(row: PublicationRow): PublicationView {
+export function serializePublication(
+  row: PublicationRow,
+  listUpdatedAt?: string | null,
+): PublicationView {
   return {
     shareId: row.id,
     status: row.status as PublicationStatus,
@@ -169,6 +174,9 @@ export function serializePublication(row: PublicationRow): PublicationView {
     updatedAt: row.updated_at,
     shareUrl: `/s/${row.id}`,
     hubOptIn: Boolean(row.hub_opt_in),
+    hasUnpublishedChanges: Boolean(
+      listUpdatedAt && listUpdatedAt > row.updated_at,
+    ),
   };
 }
 

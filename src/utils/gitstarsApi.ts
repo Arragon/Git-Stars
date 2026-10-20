@@ -352,6 +352,7 @@ export interface PublicationView {
   updatedAt: string;
   shareUrl: string;
   hubOptIn: boolean;
+  hasUnpublishedChanges: boolean;
 }
 
 export const publishList = (listId: string) =>

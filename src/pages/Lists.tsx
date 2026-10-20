@@ -634,10 +634,27 @@ export const Lists: React.FC = () => {
     if (!publication) return;
     const url = `${window.location.origin}${publication.shareUrl}`;
     try {
+      if (!navigator.clipboard) throw new Error("clipboard unavailable");
       await navigator.clipboard.writeText(url);
       showToast("分享链接已复制");
     } catch {
-      setShareError("复制失败，请手动复制: " + url);
+      // Fallback for non-secure contexts / older browsers (M8-12): let the user copy
+      // the exact URL instead of only showing an error.
+      const textarea = document.createElement("textarea");
+      textarea.value = url;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      let copied = false;
+      try {
+        copied = document.execCommand("copy");
+      } catch {
+        copied = false;
+      }
+      document.body.removeChild(textarea);
+      if (copied) showToast("分享链接已复制");
+      else setShareError("复制失败，请手动复制: " + url);
     }
   };
 
