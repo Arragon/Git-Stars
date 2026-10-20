@@ -106,10 +106,26 @@ export const Home: React.FC = () => {
     }
   }, [searchParams]);
 
+  // M8-01: one destination contract for both login paths; `redirect` stays supported as
+  // a legacy alias used by public share pages.
+  const returnTo = (() => {
+    const raw =
+      searchParams.get("returnTo") ??
+      searchParams.get("redirect") ??
+      "/library";
+    return raw.startsWith("/") &&
+      !raw.startsWith("//") &&
+      !raw.includes("\\") &&
+      !raw.startsWith("/api/")
+      ? raw
+      : "/library";
+  })();
+
   const handleLogin = () => {
-    console.log("[Home] Redirecting to GitHub OAuth...");
     setIsLoggingIn(true);
-    window.location.assign("/api/auth/github/login");
+    window.location.assign(
+      `/api/auth/github/login?returnTo=${encodeURIComponent(returnTo)}`,
+    );
   };
 
   const handleDevLogin = async () => {
@@ -118,15 +134,11 @@ export const Home: React.FC = () => {
     setError(null);
 
     try {
-      await apiPost("/api/auth/dev-login");
-      // Honor an app-relative redirect (e.g. /?redirect=/s/<shareId> from a
-      // public share page) so the post-login flow returns where the user was.
-      const redirect = searchParams.get("redirect");
-      window.location.assign(
-        redirect && redirect.startsWith("/") && !redirect.startsWith("//")
-          ? redirect
-          : "/library",
+      const res = await apiPost<{ ok: boolean; returnTo?: string }>(
+        "/api/auth/dev-login",
+        { returnTo },
       );
+      window.location.assign(res.returnTo ?? returnTo);
     } catch (err) {
       console.error("[Home] Dev login failed:", err);
       setError(
@@ -164,6 +176,10 @@ export const Home: React.FC = () => {
               记录判断，保留真正有用的线索
             </span>
           </div>
+          <p className="muted small">
+            首次使用：当前支持 Web + GitHub。收藏、列表与备注保存在本机 SQLite
+            数据库，不上传到第三方；首次同步分页进行，中断后可继续。
+          </p>
           {error && (
             <div className="notice error" role="alert">
               <AlertCircle className="ico" />
