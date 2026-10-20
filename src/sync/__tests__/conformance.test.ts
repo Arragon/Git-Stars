@@ -1042,9 +1042,8 @@ describe("Determinism", () => {
     s2.applyMutation("k2", "tag", "t2", { name: "beta" }, 0);
 
     // createdAt is a wall-clock stamp; two servers legitimately differ by a millisecond.
-    const stripTimestamps = (
-      log: Array<{ createdAt: string } & Record<string, unknown>>,
-    ) => log.map(({ createdAt: _createdAt, ...rest }) => rest);
+    const stripTimestamps = (log: Array<{ createdAt: string }>) =>
+      log.map(({ createdAt: _createdAt, ...rest }) => rest);
     expect(stripTimestamps(s1.changeLog)).toEqual(
       stripTimestamps(s2.changeLog),
     );
