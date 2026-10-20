@@ -328,6 +328,37 @@ export const revokeProvider = (providerType: string, host?: string) =>
   );
 
 // Account ownership (INH-476): full data export + two-step deletion.
+export interface AccountImportCounts {
+  repositories: number;
+  savedCreate: number;
+  savedExisting: number;
+  unresolved: number;
+  tagsCreate: number;
+  tagLinks: number;
+  listsCreate: number;
+  listsExisting: number;
+  listItems: number;
+  preferences: "apply" | "keep";
+}
+
+export interface AccountImportResponse {
+  ok: boolean;
+  dryRun: boolean;
+  counts?: AccountImportCounts;
+  errors: string[];
+}
+
+/** Dry-run an account restore (M8-09). */
+export const planAccountImport = (bundle: unknown) =>
+  apiPost<AccountImportResponse>("/api/account/import", { bundle });
+
+/** Apply a previously previewed account restore. */
+export const applyAccountImport = (bundle: unknown) =>
+  apiPost<AccountImportResponse>("/api/account/import?dryRun=0", {
+    bundle,
+    dryRun: false,
+  });
+
 export const exportAccountData = () => apiGet<unknown>("/api/account/export");
 export interface DeletionRequestResponse {
   confirmation: string;

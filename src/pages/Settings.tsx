@@ -25,7 +25,10 @@ import {
   listProviders,
   requestAccountDeletion,
   revokeProvider,
+  applyAccountImport,
+  planAccountImport,
   syncProvider,
+  type AccountImportResponse,
   type DeletionRequestResponse,
   type ProviderAccount,
 } from "../utils/gitstarsApi";
@@ -715,6 +718,14 @@ const AccountSection: React.FC = () => {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
 
+  // Portable restore (M8-09): dry-run first, then apply.
+  const [importBundle, setImportBundle] = useState<unknown>(null);
+  const [importPlan, setImportPlan] = useState<AccountImportResponse | null>(
+    null,
+  );
+  const [importBusy, setImportBusy] = useState(false);
+  const [importError, setImportError] = useState("");
+
   // Two-step account deletion
   const [deletion, setDeletion] = useState<DeletionRequestResponse | null>(
     null,
@@ -722,6 +733,39 @@ const AccountSection: React.FC = () => {
   const [deleteInput, setDeleteInput] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+
+  const onPickImport = async (file: File | undefined) => {
+    if (!file) return;
+    setImportError("");
+    setImportPlan(null);
+    try {
+      const bundle = JSON.parse(await file.text()) as unknown;
+      const plan = await planAccountImport(bundle);
+      setImportBundle(bundle);
+      setImportPlan(plan);
+    } catch (e) {
+      setImportError(e instanceof SyntaxError ? "文件不是有效的 JSON" : msg(e));
+    }
+  };
+
+  const onApplyImport = async () => {
+    if (!importBundle || importBusy) return;
+    setImportBusy(true);
+    setImportError("");
+    try {
+      const result = await applyAccountImport(importBundle);
+      const counts = result.counts;
+      showToast(
+        `恢复完成：${counts?.savedCreate ?? 0} 个收藏、${counts?.listsCreate ?? 0} 个列表、${counts?.listItems ?? 0} 个条目`,
+      );
+      setImportPlan(null);
+      setImportBundle(null);
+    } catch (e) {
+      setImportError(msg(e));
+    } finally {
+      setImportBusy(false);
+    }
+  };
 
   const onExport = async () => {
     setExporting(true);
@@ -815,6 +859,50 @@ const AccountSection: React.FC = () => {
           {exporting ? "导出中…" : "导出数据"}
         </button>
       </div>
+      <div className="setting-row">
+        <div>
+          <h3>从导出文件恢复</h3>
+          <p>
+            先预检再写入。不会恢复登录凭证、API
+            Key、分享/公开状态；无法访问的私有仓库会跳过。
+          </p>
+          {importPlan?.counts && (
+            <p className="small muted">
+              将新增 {importPlan.counts.savedCreate} 个收藏、
+              {importPlan.counts.listsCreate} 个列表、
+              {importPlan.counts.listItems} 个条目；已存在{" "}
+              {importPlan.counts.savedExisting} 个；跳过{" "}
+              {importPlan.counts.unresolved} 项
+            </p>
+          )}
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <label className="btn sm" title="选择导出的 JSON 文件">
+            选择文件
+            <input
+              type="file"
+              accept="application/json,.json"
+              hidden
+              onChange={(e) => void onPickImport(e.target.files?.[0])}
+            />
+          </label>
+          {importPlan && (
+            <button
+              type="button"
+              className="btn sm primary"
+              disabled={importBusy}
+              onClick={() => void onApplyImport()}
+            >
+              {importBusy ? "恢复中…" : "确认恢复"}
+            </button>
+          )}
+        </div>
+      </div>
+      {importError && (
+        <div className="notice error mt16" role="alert">
+          <span className="grow">{importError}</span>
+        </div>
+      )}
       <div className="setting-row">
         <div>
           <h3>退出当前账户</h3>

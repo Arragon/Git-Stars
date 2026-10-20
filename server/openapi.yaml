@@ -911,6 +911,31 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Preferences" }
+  /account/import:
+    post:
+      tags: [account]
+      summary: Dry-run or apply a portable account restore
+      description: >
+        Dry-runs by default; pass `?dryRun=0` (or `dryRun: false`) to apply in one
+        transaction. Credentials, sessions and publication state are never restored;
+        private repositories the caller cannot access are reported as unresolved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bundle]
+              properties:
+                bundle: { type: object }
+                dryRun: { type: boolean, default: true }
+      responses:
+        "200":
+          description: Import plan or result
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/Error400" }
   /account/export:
     get:
       tags: [account]
