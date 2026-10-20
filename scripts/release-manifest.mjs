@@ -10,18 +10,24 @@
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Resolve repo metadata from the script location, never from cwd: release runs this from
+// `release/`, and cwd-relative reads made v0.1.0 fail at the manifest step (M7-09).
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function sh(cmd) {
-  return execSync(cmd, { encoding: "utf8" }).trim();
+  return execSync(cmd, { encoding: "utf8", cwd: ROOT }).trim();
 }
 
-const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
 const version = process.env.RELEASE_VERSION ?? pkg.version;
 const commit = sh("git rev-parse HEAD");
 const commitShort = commit.slice(0, 12);
 
 // Protocol/contract versions come from server/versions.ts (single source of truth).
-const versionsSrc = readFileSync("server/versions.ts", "utf8");
+const versionsSrc = readFileSync(resolve(ROOT, "server/versions.ts"), "utf8");
 function constant(name) {
   const match = new RegExp(`export const ${name}\\s*=\\s*"?([^"\\n;]+)"?`).exec(
     versionsSrc,
