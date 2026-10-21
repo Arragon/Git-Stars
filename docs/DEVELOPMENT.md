@@ -7,6 +7,8 @@
 - 本地开发需要在项目根目录的 `.env` 中配置：
   - `SESSION_SECRET`（必填）
   - `LOCAL_DEV_USER`（可选，启用本地开发登录）
+  - `ALLOW_DEV_LOGIN`（可选，`NODE_ENV=production` 时开发登录必须显式设为 `true`；
+    否则 `POST /api/auth/dev-login` 返回 `DEV_LOGIN_DISABLED`）
   - `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`（可选，启用 GitHub OAuth）
 
 ## 常用命令

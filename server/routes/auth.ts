@@ -262,7 +262,12 @@ authRoutes.post("/dev-login", async (c) => {
     return c.json(
       {
         code: "DEV_LOGIN_DISABLED",
-        message: "LOCAL_DEV_USER is not set; dev login is disabled.",
+        // Distinguish "no local user configured" from "production without the
+        // explicit opt-in"; the old message blamed LOCAL_DEV_USER even when the
+        // real cause was a missing ALLOW_DEV_LOGIN (found by the G8 clean install).
+        message: env.localDevUser
+          ? "Dev login is disabled in production unless ALLOW_DEV_LOGIN=true."
+          : "LOCAL_DEV_USER is not set; dev login is disabled.",
       },
       403,
     );
