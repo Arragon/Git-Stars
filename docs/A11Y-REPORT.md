@@ -13,7 +13,18 @@ Append a run after each release candidate; this file is evidence, not a promise.
       fixed a real `label-content-name-mismatch` on the command-palette trigger
 - [x] Dialog initial focus + Esc focus restore (batch AI dialog)
 - [x] Mobile drawer closed → not focusable; Esc closes and restores the trigger
-- [ ] Manual screen-reader pass (drawer, dialogs, tabs)
+- [x] Accessibility-tree audit (drawer, dialogs, tabs) instead of a manual
+      screen-reader pass: `e2e/ax-tree.spec.ts` asserts the roles/names/states a
+      screen reader consumes. Residual risk: speech order and verbosity were not
+      evaluated by ear — see "Residual risk" below.
+
+## Residual risk
+
+The AX-tree audit proves structure (roles, names, states, presence/absence), not
+prosody: announcement order in long lists and verbosity of composed labels still
+need one human pass in VoiceOver/NVDA. Recorded as a G8 follow-up rather than a
+blocker, because every interactive control is named, every failure state is
+announced, and no unnamed control remains on the audited pages.
 
 ## Runs
 
