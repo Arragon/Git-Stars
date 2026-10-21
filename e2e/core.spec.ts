@@ -82,3 +82,30 @@ test("no duplicate element ids on the library page", async ({ page }) => {
   });
   expect(duplicates).toEqual([]);
 });
+
+// G8: an unconfigured AI must never block the core Library flow.
+test("unconfigured AI shows an error but leaves the library usable", async ({
+  page,
+  isMobile,
+}) => {
+  await login(page);
+  await page.goto("/library");
+  await expect(page.getByText("demo", { exact: false }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: /AI 摘要/ }).click();
+  await page.getByRole("button", { name: /补充缺失摘要/ }).click();
+
+  // The failure is surfaced, not swallowed, and it is a recoverable state.
+  await expect(page.getByRole("alert")).toContainText(/AI 设置|API Key/);
+  // Dismiss the dialog, then confirm the library still works end to end.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await page.getByLabel("搜索收藏库").fill("demo");
+  await expect(page.getByText("demo", { exact: false }).first()).toBeVisible();
+  // The sidebar link only exists on desktop; below the breakpoint it lives in the
+  // closed drawer, so the search result above already proves the page still works.
+  if (!isMobile) {
+    await page.getByRole("link", { name: /收藏库/ }).click();
+    await expect(page).toHaveURL(/\/library/);
+  }
+});

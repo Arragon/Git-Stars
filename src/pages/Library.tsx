@@ -659,7 +659,7 @@ export const Library: React.FC = () => {
       </div>
 
       {error && (
-        <div className="notice error">
+        <div className="notice error" role="alert">
           <span className="grow">{error}</span>
         </div>
       )}
