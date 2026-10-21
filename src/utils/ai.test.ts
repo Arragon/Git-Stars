@@ -64,7 +64,7 @@ describe("summarizeFromSources (M8-07)", () => {
     });
 
     const prompt = promptSentToModel();
-    expect(prompt).toContain("<readme ref=\"HEAD\">");
+    expect(prompt).toContain('<readme ref="HEAD">');
     expect(prompt).toContain("UNTRUSTED DATA");
     expect(prompt).toMatch(/ignore previous instructions/); // kept as data, not obeyed
 

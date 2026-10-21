@@ -179,9 +179,9 @@ describe("AI summary provenance (M8-07)", () => {
       id: string;
       aiSummarySources?: typeof provenance;
     }>;
-    expect(items.find((i) => i.id === savedId)?.aiSummarySources?.[0]?.model).toBe(
-      "test-model",
-    );
+    expect(
+      items.find((i) => i.id === savedId)?.aiSummarySources?.[0]?.model,
+    ).toBe("test-model");
 
     // The personal note is never touched by an AI write.
     const row = db
