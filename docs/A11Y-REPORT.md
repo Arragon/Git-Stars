@@ -17,4 +17,6 @@ Append a run after each release candidate; this file is evidence, not a promise.
 
 | Date | Commit | Result | Notes |
 | --- | --- | --- | --- |
-| 2026-10-20 | `m8-daily-workflow` @ 71491bf | see CI/run output | first run after adding Playwright; desktop + mobile projects |
+| 2026-10-21 | `m8-daily-workflow` @ eff7222 | **12/12 passed** (desktop + mobile, 4.7s) | first green run; caught and fixed a real defect (repository detail crashed on the nested `identity` contract) plus two test-isolation issues |
+| 2026-10-21 | `m8-daily-workflow` @ a300cfe | 9/12 (first real run) | failures: repository page white screen (`repo.providerType` undefined), cross-test state pollution (shared seeded DB) |
+| 2026-10-20 | `m8-daily-workflow` @ 71491bf | infra only | Playwright wired; desktop + mobile projects |
