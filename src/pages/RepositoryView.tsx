@@ -37,11 +37,16 @@ import {
   getTree,
   listTags,
   updateSaved,
+  type ReadmeView,
   type ReleaseView,
   type RepositoryDetailView,
   type Tag,
   type TreeEntryView,
 } from "../utils/gitstarsApi";
+
+// M8-05: session-level README cache keyed by repositoryId; entries are
+// superseded only when the server-reported content digest changes.
+const readmeSessionCache = new Map<string, ReadmeView>();
 import { renderMarkdownSafe } from "../lib/markdown";
 import { summarizeProject } from "../utils/ai";
 import { formatCount } from "../utils/libraryFilters";
@@ -149,7 +154,7 @@ export const RepositoryView: React.FC = () => {
     }, 700);
   };
 
-  const [readme, setReadme] = useState<string | null>(null);
+  const [readme, setReadme] = useState<ReadmeView | null>(null);
   const [entries, setEntries] = useState<TreeEntryView[] | null>(null);
   const [dirPath, setDirPath] = useState("");
   const [file, setFile] = useState<{ path: string; content: string } | null>(
@@ -294,8 +299,15 @@ export const RepositoryView: React.FC = () => {
     const run = async () => {
       try {
         if (tab === "readme" && caps.readme && readme === null) {
+          // M8-05 content identity: serve the session copy immediately, then
+          // re-fetch and only re-render when the digest actually changed.
+          const cached = readmeSessionCache.get(id);
+          if (cached && !cancelled) setReadme(cached);
           const r = await getReadme(id);
-          if (!cancelled) setReadme(r.content);
+          readmeSessionCache.set(id, r);
+          if (!cancelled && (!cached || cached.sha256 !== r.sha256)) {
+            setReadme(r);
+          }
         } else if (tab === "files" && caps.tree && entries === null) {
           const t = await getTree(id, "", "");
           if (!cancelled) setEntries(t.entries);
@@ -670,12 +682,23 @@ export const RepositoryView: React.FC = () => {
                   <BookOpen className="ico small" />
                   README.md
                 </span>
+                {readme && (
+                  <span
+                    className="muted tiny"
+                    title={`ref ${readme.ref} · sha256 ${readme.sha256.slice(0, 12)}…`}
+                  >
+                    抓取于{" "}
+                    {new Date(readme.fetchedAt).toLocaleString("zh-CN", {
+                      hour12: false,
+                    })}
+                  </span>
+                )}
               </div>
               {readme ? (
                 <div
                   dangerouslySetInnerHTML={{
                     __html: renderMarkdownSafe(
-                      readme,
+                      readme.content,
                       repo
                         ? {
                             linkBase: `${repo.webUrl}/blob/HEAD/`,
