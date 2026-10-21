@@ -206,8 +206,8 @@ function runImport(
           const now = new Date().toISOString();
           db.prepare(
             `INSERT INTO saved_repositories
-               (id, user_id, repository_id, status, note, ai_summary, ai_tags, version, added_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+               (id, user_id, repository_id, status, note, ai_summary, ai_summary_sources, ai_tags, version, added_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
           ).run(
             savedId,
             userId,
@@ -215,6 +215,9 @@ function runImport(
             typeof entry.status === "string" ? entry.status : "saved",
             (entry.note ?? "").slice(0, MAX_NOTE) || null,
             entry.aiSummary ?? null,
+            Array.isArray(entry.aiSummarySources)
+              ? JSON.stringify(entry.aiSummarySources.slice(0, 32))
+              : null,
             JSON.stringify(Array.isArray(entry.aiTags) ? entry.aiTags : []),
             entry.addedAt ?? new Date().toISOString(),
             now,

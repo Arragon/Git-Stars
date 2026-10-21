@@ -1179,6 +1179,9 @@ components:
                 status: { type: string }
                 note: { type: string }
                 aiSummary: { type: string }
+                aiSummarySources:
+                  type: array
+                  items: { type: object, additionalProperties: true }
                 version: { type: integer }
                 addedAt: { type: string, format: date-time }
                 tags:
@@ -1194,6 +1197,10 @@ components:
         status: { type: string }
         note: { type: string }
         aiSummary: { type: string }
+        aiSummarySources:
+          type: array
+          description: M8-07 provenance records (model, generatedAt, sources with content identity, unknowns, conflicts)
+          items: { type: object, additionalProperties: true }
         aiTags: { type: array, items: { type: string } }
         addedAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }

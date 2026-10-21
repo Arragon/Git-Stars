@@ -42,6 +42,8 @@ export interface SavedRepository {
   status: string;
   note?: string;
   aiSummary?: string;
+  /** M8-07 provenance records (model, generatedAt, sources with content identity). */
+  aiSummarySources?: unknown[];
   aiTags: string[];
   addedAt: string;
   updatedAt: string;
@@ -83,6 +85,7 @@ export interface RepositoryDetailView {
     status: string;
     note?: string;
     aiSummary?: string;
+    aiSummarySources?: unknown[];
     aiTags?: string[];
     version: number;
     addedAt: string;
@@ -154,6 +157,7 @@ export const updateSaved = (
     note?: string;
     status?: string;
     aiSummary?: string;
+    aiSummarySources?: unknown[] | null;
     aiTags?: string[];
   },
   etag?: string,
