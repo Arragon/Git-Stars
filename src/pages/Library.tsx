@@ -955,7 +955,8 @@ export const Library: React.FC = () => {
             重新生成全部 · {items.length} 项
           </Button>
           <p className="tiny mt8">
-            范围为当前筛选结果。重新生成会覆盖现有摘要与 AI 标签。
+            范围为当前筛选结果。重新生成会覆盖现有摘要与 AI
+            标签，并对每项再次调用模型，可能产生重复费用；上次失败或结果未知的条目不会自动重试，只会随你手动发起的批次重新请求。
           </p>
         </div>
       </Dialog>
