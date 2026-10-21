@@ -8,6 +8,10 @@ const idemKey = (): string =>
     ? globalThis.crypto.randomUUID()
     : String(Math.random());
 
+// The library list projects repository identity flat (SavedRepository.repository),
+// while the detail view nests it under `identity` (see server/openapi.yaml
+// RepositoryView). Keep both shapes distinct so the client cannot mix them up
+// (M8-10 e2e found a runtime crash from reading `providerType` on the detail view).
 export interface RepositoryProjection {
   id: string;
   providerType: string;
@@ -23,6 +27,12 @@ export interface RepositoryProjection {
   starsCount: number;
   forksCount: number;
   status: string;
+}
+
+export interface RepositoryIdentityView {
+  providerType: string;
+  host: string;
+  remoteId: string;
 }
 
 export interface SavedRepository {
@@ -53,7 +63,20 @@ export interface RepositoryCapabilities {
   privateRepos: boolean;
 }
 
-export interface RepositoryDetailView extends RepositoryProjection {
+export interface RepositoryDetailView {
+  id: string;
+  identity: RepositoryIdentityView;
+  canonicalKey: string;
+  name: string;
+  namespacePath?: string;
+  webUrl: string;
+  description?: string;
+  visibility?: string;
+  primaryLanguage?: string;
+  starsCount: number;
+  forksCount: number;
+  status: string;
+  metadataFetchedAt?: string;
   capabilities: RepositoryCapabilities | null;
   saved: {
     id: string;

@@ -624,9 +624,24 @@ export async function upsertRepositoryDetail(
     "readwrite",
     async (tx) => {
       const existing = await tx.get<CachedRepository>("repositories", view.id);
+      // The detail view nests identity (`identity.providerType/...`); the cache
+      // stores it flat, so flatten here (M8-10 e2e crash fix).
       tx.put<CachedRepository>("repositories", {
         ...(existing ?? {}),
-        ...toProjection(view),
+        id: view.id,
+        providerType: view.identity.providerType,
+        host: view.identity.host,
+        remoteId: view.identity.remoteId,
+        canonicalKey: view.canonicalKey,
+        name: view.name,
+        namespacePath: view.namespacePath,
+        webUrl: view.webUrl,
+        description: view.description,
+        visibility: view.visibility,
+        primaryLanguage: view.primaryLanguage,
+        starsCount: view.starsCount,
+        forksCount: view.forksCount,
+        status: view.status,
         cachedAt: nowIso(),
       });
       if (view.saved) {

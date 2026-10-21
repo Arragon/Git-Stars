@@ -172,10 +172,28 @@ export const RepositoryView: React.FC = () => {
       const cached = await readRepositorySavedCache(id);
       setTags(cached.tags);
       if (!cached.repo) return;
+      const cr = cached.repo;
       setRepo((current) => {
         if (current) return current; // server data wins once loaded
+        // The cache stores identity flat (CachedRepository); the detail view nests it.
         return {
-          ...cached.repo!,
+          id: cr.id,
+          identity: {
+            providerType: cr.providerType,
+            host: cr.host,
+            remoteId: cr.remoteId,
+          },
+          canonicalKey: cr.canonicalKey,
+          name: cr.name,
+          namespacePath: cr.namespacePath,
+          webUrl: cr.webUrl,
+          description: cr.description,
+          visibility: cr.visibility,
+          primaryLanguage: cr.primaryLanguage,
+          starsCount: cr.starsCount,
+          forksCount: cr.forksCount,
+          status: cr.status,
+          metadataFetchedAt: cr.metadataFetchedAt,
           capabilities: null,
           saved: cached.saved
             ? {
@@ -497,6 +515,15 @@ export const RepositoryView: React.FC = () => {
   return (
     <div>
       <div className="reader-head">
+        <button
+          type="button"
+          className="btn ghost sm"
+          title="返回"
+          aria-label="返回收藏库"
+          onClick={() => navigate(returnTo)}
+        >
+          <ArrowLeft className="ico" /> 返回收藏库
+        </button>
         <span className={`repo-emblem ${emblem.toneCls}`}>
           {emblem.initials}
         </span>
@@ -653,7 +680,7 @@ export const RepositoryView: React.FC = () => {
                         ? {
                             linkBase: `${repo.webUrl}/blob/HEAD/`,
                             imageBase:
-                              repo.providerType === "github"
+                              repo.identity.providerType === "github"
                                 ? `${repo.webUrl.replace(
                                     "github.com",
                                     "raw.githubusercontent.com",
@@ -957,7 +984,7 @@ export const RepositoryView: React.FC = () => {
                   <div>
                     <span>平台</span>
                     <span className="row gap8">
-                      {repo.providerType === "github" ? (
+                      {repo.identity.providerType === "github" ? (
                         <svg className="ico small" viewBox="0 0 24 24">
                           <path
                             d="M9 20c-5 1-5-2-7-3m14 5v-4a3.5 3.5 0 0 0-1-2.8c3.4-.4 7-1.7 7-7.3a5.5 5.5 0 0 0-1.5-3.8A5 5 0 0 0 20 0s-1.3-.4-4 1.5a13 13 0 0 0-8 0C5.3-.4 4 0 4 0a5 5 0 0 0-.5 3.1A5.5 5.5 0 0 0 2 6.9c0 5.6 3.6 6.9 7 7.3A3.5 3.5 0 0 0 8 17v5"
@@ -965,7 +992,7 @@ export const RepositoryView: React.FC = () => {
                           />
                         </svg>
                       ) : null}
-                      {repo.providerType.toUpperCase()}
+                      {repo.identity.providerType.toUpperCase()}
                     </span>
                   </div>
                   <div>
@@ -1007,7 +1034,7 @@ export const RepositoryView: React.FC = () => {
               <div className="repo-facts">
                 <div>
                   <span>平台</span>
-                  <span>{repo.providerType.toUpperCase()}</span>
+                  <span>{repo.identity.providerType.toUpperCase()}</span>
                 </div>
                 <div>
                   <span>主要语言</span>
