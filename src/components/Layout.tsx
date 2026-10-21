@@ -341,7 +341,7 @@ export const Layout: React.FC = () => {
             <button
               type="button"
               className="btn ghost sm command-shortcut"
-              aria-label="搜索与快捷跳转"
+              aria-label="搜索与快捷跳转，快捷键 ⌘ / Ctrl K"
               onClick={() => setPaletteOpen(true)}
             >
               <Search className="ico small" />
