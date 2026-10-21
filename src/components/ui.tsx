@@ -4,7 +4,7 @@
 // (bg-surface, text-ink, border-line, bg-brand …), ships focus-visible rings
 // and disabled states, and keeps the pre-redesign export signatures.
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useId, useRef } from "react";
 
 // --- class building blocks (exported for rare one-off composition) ---
 
@@ -293,6 +293,9 @@ export const Dialog: React.FC<DialogProps> = ({
   width = "520px",
 }) => {
   const ref = useRef<HTMLDialogElement>(null);
+  // M8-10: <dialog> takes its accessible name from aria-labelledby (not from its
+  // content), so a screen reader would otherwise announce an unnamed dialog.
+  const titleId = useId();
 
   useEffect(() => {
     const el = ref.current;
@@ -304,6 +307,7 @@ export const Dialog: React.FC<DialogProps> = ({
   return (
     <dialog
       ref={ref}
+      aria-labelledby={titleId}
       onClose={onClose}
       onClick={(e) => {
         if (e.target === ref.current) onClose();
@@ -312,7 +316,9 @@ export const Dialog: React.FC<DialogProps> = ({
       style={{ width: variant === "modal" ? width : undefined }}
     >
       <div className="flex justify-between items-center px-6 py-[21px] border-b border-line sticky top-0 bg-surface z-10">
-        <h2 className="text-[17px] font-[650]">{title}</h2>
+        <h2 id={titleId} className="text-[17px] font-[650]">
+          {title}
+        </h2>
         <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose}>
           ✕
         </Button>
