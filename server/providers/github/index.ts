@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { sha256Hex } from "../../lib/contentIdentity.js";
 import {
   dedupe,
   httpBytes,
@@ -275,6 +276,10 @@ export const githubProvider: RepositoryProvider = {
       path: "README.md",
       format: "markdown",
       content,
+      ref: "HEAD",
+      etag: res.headers.get("etag") ?? undefined,
+      sha256: sha256Hex(content),
+      fetchedAt: new Date().toISOString(),
     } satisfies ReadmeResult;
   },
 
