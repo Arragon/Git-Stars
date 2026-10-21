@@ -12,28 +12,31 @@ test("library shows the seeded repository", async ({ page }) => {
   await expect(page.getByText("demo", { exact: false }).first()).toBeVisible();
 });
 
-test("note edit survives a reload", async ({ page }) => {
+test("note edit survives a reload", async ({ page }, testInfo) => {
+  // Tests share the seeded server database, so the note must be unique per run:
+  // an unchanged value is a no-op save and never reaches the "已保存" state.
+  const note = `e2e note ${testInfo.project.name} ${Date.now()}`;
   await login(page);
   await page.goto("/repository/e2e-repo");
   const editor = page.getByLabel("个人备注");
   await expect(editor).toBeVisible();
-  await editor.fill("e2e note persisted");
+  await editor.fill(note);
   await editor.blur();
   await expect(page.getByText("已保存", { exact: true })).toBeVisible({
     timeout: 15_000,
   });
   await page.reload();
-  await expect(page.getByLabel("个人备注")).toHaveValue("e2e note persisted");
+  await expect(page.getByLabel("个人备注")).toHaveValue(note);
 });
 
 test("filter context survives the repository round trip", async ({ page }) => {
   await login(page);
-  await page.goto("/library?q=seed");
+  await page.goto("/library?q=demo");
   await expect(page.getByText("demo", { exact: false }).first()).toBeVisible();
   await page.getByRole("link", { name: /demo/i }).first().click();
   await expect(page).toHaveURL(/\/repository\/e2e-repo\?from=/);
   await page.getByRole("button", { name: /返回收藏库/ }).click();
-  await expect(page).toHaveURL(/\/library\?q=seed/);
+  await expect(page).toHaveURL(/\/library\?q=demo/);
 });
 
 test("interactive controls expose accessible names", async ({ page }) => {
