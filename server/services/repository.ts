@@ -213,7 +213,8 @@ export function getRepositoryView(repositoryId: string, userId: string) {
   const provider = getProvider(row.provider_type);
   const saved = getDb()
     .prepare(
-      `SELECT id, status, note, ai_summary, ai_tags, version, added_at FROM saved_repositories
+      `SELECT id, status, note, ai_summary, ai_summary_sources, ai_tags, version, added_at
+       FROM saved_repositories
        WHERE user_id = ? AND repository_id = ? AND deleted_at IS NULL`,
     )
     .get(userId, repositoryId) as unknown as
@@ -222,6 +223,7 @@ export function getRepositoryView(repositoryId: string, userId: string) {
         status: string;
         note: string | null;
         ai_summary: string | null;
+        ai_summary_sources: string | null;
         ai_tags: string;
         version: number;
         added_at: string;
@@ -243,6 +245,7 @@ export function getRepositoryView(repositoryId: string, userId: string) {
           status: saved.status,
           note: saved.note ?? undefined,
           aiSummary: saved.ai_summary ?? undefined,
+          aiSummarySources: safeParseArray(saved.ai_summary_sources),
           aiTags: safeParseStringArray(saved.ai_tags),
           version: Number(saved.version),
           addedAt: saved.added_at,
@@ -250,6 +253,16 @@ export function getRepositoryView(repositoryId: string, userId: string) {
         }
       : null,
   };
+}
+
+function safeParseArray(raw: string | null): unknown[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function safeParseStringArray(raw: string): string[] {

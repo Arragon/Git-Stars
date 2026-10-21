@@ -48,7 +48,7 @@ import {
 // superseded only when the server-reported content digest changes.
 const readmeSessionCache = new Map<string, ReadmeView>();
 import { renderMarkdownSafe } from "../lib/markdown";
-import { summarizeProject } from "../utils/ai";
+import { summarizeFromSources, type AiSummaryProvenance } from "../utils/ai";
 import { formatCount } from "../utils/libraryFilters";
 import { ApiError } from "../utils/api";
 import {
@@ -106,6 +106,8 @@ export const RepositoryView: React.FC = () => {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
+  // M8-07: private repos need explicit consent before the README body is sent.
+  const [privateConsent, setPrivateConsent] = useState(false);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagName, setTagName] = useState("");
   const tagInputRef = useRef<HTMLInputElement>(null);
@@ -241,7 +243,11 @@ export const RepositoryView: React.FC = () => {
     void load();
   }, [load]);
 
-  /** Generate summary + tags via the configured AI vendor, then persist. */
+  /**
+   * Generate a sourced summary (M8-07): metadata + README + releases, with the content
+   * identity of each source kept next to the text. Private repos only send the body
+   * after explicit consent; the personal note is never sent.
+   */
   const runAiSummary = () => {
     const saved = repo?.saved;
     if (!saved || aiBusy) return;
@@ -249,19 +255,83 @@ export const RepositoryView: React.FC = () => {
       setError("AI 总结需要联网后使用");
       return;
     }
+    const isPrivate = repo?.visibility === "private";
+    if (isPrivate && !privateConsent) {
+      setError("私有仓库：请先勾选允许将 README 正文发送给模型");
+      return;
+    }
     setAiBusy(true);
     setError("");
     void (async () => {
       try {
-        const result = await summarizeProject(
-          repo!.name,
-          repo!.description ?? "",
-          repo!.primaryLanguage ?? "",
-          saved.tags.map((t) => t.name),
-        );
+        const caps = repo?.capabilities;
+        let readmeInput: {
+          content: string;
+          ref: string;
+          sha256: string;
+          fetchedAt: string;
+          url: string;
+        } | null = null;
+        if (caps?.readme) {
+          try {
+            const r = readme ?? (await getReadme(id));
+            readmeSessionCache.set(id, r);
+            readmeInput = {
+              content: r.content,
+              ref: r.ref,
+              sha256: r.sha256,
+              fetchedAt: r.fetchedAt,
+              url: `${repo!.webUrl}/blob/HEAD/README.md`,
+            };
+          } catch {
+            readmeInput = null; // degrade to metadata-only, recorded as omitted source
+          }
+        }
+        let releaseInput:
+          | Array<{
+              tagName: string;
+              publishedAt?: string;
+              assetNames: string[];
+            }>
+          | undefined;
+        if (caps?.releases) {
+          try {
+            const rel = releases ? { items: releases } : await getReleases(id);
+            if (!releases) setReleases(rel.items);
+            releaseInput = rel.items.slice(0, 10).map((r) => ({
+              tagName: r.tagName,
+              publishedAt: r.publishedAt,
+              assetNames: r.assets.map((a) => a.name),
+            }));
+          } catch {
+            releaseInput = undefined;
+          }
+        }
+
+        const result = await summarizeFromSources({
+          name: repo!.name,
+          description: repo!.description ?? "",
+          language: repo!.primaryLanguage ?? "",
+          webUrl: repo!.webUrl,
+          readme: readmeInput,
+          releases: releaseInput,
+          existingTags: saved.tags.map((t) => t.name),
+          isPrivate,
+          allowPrivateBody: privateConsent,
+        });
+
+        // Keep a short provenance history so a past claim stays traceable (M8-07).
+        const history = [
+          ...((repo!.saved?.aiSummarySources as unknown[]) ?? []).slice(-9),
+          result.provenance,
+        ];
         const res = await updateSaved(
           saved.id,
-          { aiSummary: result.summary, aiTags: result.tags },
+          {
+            aiSummary: result.summary,
+            aiTags: result.tags,
+            aiSummarySources: history,
+          },
           `${saved.id}:${saved.version}`,
         );
         setRepo((current) =>
@@ -271,13 +341,18 @@ export const RepositoryView: React.FC = () => {
                 saved: {
                   ...current.saved,
                   aiSummary: result.summary,
+                  aiSummarySources: history,
                   aiTags: result.tags,
                   version: res.version,
                 },
               }
             : current,
         );
-        showToast("AI 摘要已更新");
+        showToast(
+          result.unknowns.length > 0
+            ? "AI 摘要已更新（部分信息不足）"
+            : "AI 摘要已更新",
+        );
       } catch (err) {
         setError(
           friendly(
@@ -902,6 +977,66 @@ export const RepositoryView: React.FC = () => {
                     ))}
                   </div>
                 )}
+                {repo.visibility === "private" && (
+                  <label className="tiny mt16 row gap8">
+                    <input
+                      type="checkbox"
+                      checked={privateConsent}
+                      onChange={(e) => setPrivateConsent(e.target.checked)}
+                    />
+                    允许将本仓库 README 正文发送给模型（仅本次生成）
+                  </label>
+                )}
+                {(() => {
+                  const history = (repo.saved.aiSummarySources ??
+                    []) as Array<AiSummaryProvenance>;
+                  const latest = history[history.length - 1];
+                  if (!latest) return null;
+                  const readme = latest.sources?.find(
+                    (x) => x.kind === "readme",
+                  );
+                  return (
+                    <div className="ai-provenance tiny mt16">
+                      <p className="muted">
+                        来源：{latest.model || "未知模型"} ·{" "}
+                        {new Date(latest.generatedAt).toLocaleString("zh-CN", {
+                          hour12: false,
+                        })}
+                        {readme?.sha256
+                          ? ` · README ${readme.sha256.slice(0, 8)}`
+                          : ""}
+                        {readme?.omittedReason
+                          ? ` · 正文未发送（${readme.omittedReason}）`
+                          : ""}
+                      </p>
+                      {readme?.url && readme.included && (
+                        <a
+                          href={readme.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          查看该版本 README{" "}
+                          <ExternalLink className="ico small" />
+                        </a>
+                      )}
+                      {(latest.unknowns ?? []).length > 0 && (
+                        <p className="muted mt8">
+                          信息不足：{(latest.unknowns ?? []).join("；")}
+                        </p>
+                      )}
+                      {(latest.conflicts ?? []).length > 0 && (
+                        <p className="muted mt8">
+                          来源冲突：{(latest.conflicts ?? []).join("；")}
+                        </p>
+                      )}
+                      {(latest.limits ?? []).length > 0 && (
+                        <p className="muted mt8">
+                          来源中说明的限制：{(latest.limits ?? []).join("；")}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
               </section>
 
               <section className="aside-section">

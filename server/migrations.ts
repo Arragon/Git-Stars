@@ -569,12 +569,28 @@ CREATE INDEX IF NOT EXISTS idx_oauth_states_expires ON oauth_states(expires_at);
 `);
 }
 
+function migrationV6(db: DatabaseSync): void {
+  // M8-07: AI summaries carry provenance (which sources were sent, their content
+  // identity, model, generation time) so a fact can be traced back to a version.
+  // Stored as JSON text next to ai_summary; NULL for summaries without sources.
+  const columns = all<{ name: string }>(
+    db,
+    "PRAGMA table_info(saved_repositories)",
+  ).map((c) => c.name);
+  if (!columns.includes("ai_summary_sources")) {
+    db.exec(
+      "ALTER TABLE saved_repositories ADD COLUMN ai_summary_sources TEXT",
+    );
+  }
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "new_domain_tables_and_backfill", up: migrationV1 },
   { version: 2, name: "list_items_position_key_fractional", up: migrationV2 },
   { version: 3, name: "publications_hub_audit", up: migrationV3 },
   { version: 4, name: "account_deletion_state", up: migrationV4 },
   { version: 5, name: "oauth_states_with_return_to", up: migrationV5 },
+  { version: 6, name: "ai_summary_sources", up: migrationV6 },
 ];
 
 export function latestSchemaVersion(): number {

@@ -32,6 +32,8 @@ export interface CachedSavedRepository {
   note?: string;
   /** Needed by offline filters/sorting (M8-03): previously dropped from the cache. */
   aiSummary?: string;
+  /** M8-07: provenance of the AI summary (model, time, source content identity). */
+  aiSummarySources?: unknown[];
   kinds?: string[];
   aiTags: string[];
   version: number;

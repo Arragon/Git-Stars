@@ -24,6 +24,7 @@ interface SavedRow {
   status: string;
   note: string | null;
   ai_summary: string | null;
+  ai_summary_sources: string | null;
   ai_tags: string;
   added_at: string;
   updated_at: string;
@@ -79,6 +80,7 @@ export interface AccountExport {
     status: string;
     note: string | null;
     aiSummary: string | null;
+    aiSummarySources?: unknown[] | null;
     aiTags: string[];
     addedAt: string;
     updatedAt: string;
@@ -147,7 +149,8 @@ export function buildAccountExport(userId: string): AccountExport {
 
   const savedRowsAll = db
     .prepare(
-      `SELECT sr.id, sr.repository_id, sr.status, sr.note, sr.ai_summary, sr.ai_tags,
+      `SELECT sr.id, sr.repository_id, sr.status, sr.note, sr.ai_summary,
+              sr.ai_summary_sources, sr.ai_tags,
               sr.added_at, sr.updated_at, sr.deleted_at,
               r.provider_type, r.host, r.remote_id, r.canonical_key, r.namespace_path,
               r.name, r.web_url, r.description, r.visibility, r.primary_language,
@@ -247,6 +250,9 @@ export function buildAccountExport(userId: string): AccountExport {
       status: row.status,
       note: row.note,
       aiSummary: row.ai_summary,
+      aiSummarySources: row.ai_summary_sources
+        ? safeArray(row.ai_summary_sources)
+        : null,
       aiTags: safeArray(row.ai_tags),
       addedAt: row.added_at,
       updatedAt: row.updated_at,

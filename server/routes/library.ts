@@ -23,6 +23,7 @@ interface JoinedRow {
   status: string;
   note: string | null;
   ai_summary: string | null;
+  ai_summary_sources: string | null;
   ai_tags: string;
   version: number;
   added_at: string;
@@ -45,7 +46,8 @@ interface JoinedRow {
 }
 
 const SELECT_JOIN = `
-  SELECT sr.id, sr.user_id, sr.repository_id, sr.status, sr.note, sr.ai_summary, sr.ai_tags,
+  SELECT sr.id, sr.user_id, sr.repository_id, sr.status, sr.note, sr.ai_summary,
+         sr.ai_summary_sources, sr.ai_tags,
          sr.version, sr.added_at, sr.updated_at, sr.deleted_at,
          r.provider_type, r.host, r.remote_id, r.canonical_key, r.namespace_path, r.name,
          r.web_url, r.description, r.visibility, r.primary_language, r.stars_count, r.forks_count,
@@ -96,6 +98,10 @@ function serialize(row: JoinedRow, tags: Array<{ id: string; name: string }>) {
     status: row.status,
     note: row.note ?? undefined,
     aiSummary: row.ai_summary ?? undefined,
+    aiSummarySources: parseJson<unknown[] | undefined>(
+      row.ai_summary_sources,
+      undefined,
+    ),
     aiTags: parseJson<string[]>(row.ai_tags, []),
     addedAt: row.added_at,
     updatedAt: row.updated_at,
@@ -283,7 +289,8 @@ libraryRoutes.put("/:id", async (c) => {
   const db = getDb();
   const current = db
     .prepare(
-      `SELECT sr.id, sr.version, sr.note, sr.status, sr.ai_summary, sr.ai_tags,
+      `SELECT sr.id, sr.version, sr.note, sr.status, sr.ai_summary,
+              sr.ai_summary_sources, sr.ai_tags,
               sr.repository_id, r.visibility, r.provider_type, r.host
        FROM saved_repositories sr JOIN repositories r ON r.id = sr.repository_id
        WHERE sr.id = ? AND sr.user_id = ? AND sr.deleted_at IS NULL`,
@@ -295,6 +302,7 @@ libraryRoutes.put("/:id", async (c) => {
         note: string | null;
         status: string;
         ai_summary: string | null;
+        ai_summary_sources: string | null;
         ai_tags: string;
         repository_id: string;
         visibility: string | null;
@@ -329,6 +337,11 @@ libraryRoutes.put("/:id", async (c) => {
           note: current.note,
           status: current.status,
           aiSummary: current.ai_summary,
+          aiSummarySources: parseJson<unknown[] | undefined>(
+            (current as { ai_summary_sources?: string | null })
+              .ai_summary_sources ?? null,
+            undefined,
+          ),
           aiTags: parseJson<string[]>(current.ai_tags, []),
           version: Number(current.version),
         },
@@ -341,6 +354,7 @@ libraryRoutes.put("/:id", async (c) => {
     note?: unknown;
     status?: unknown;
     aiSummary?: unknown;
+    aiSummarySources?: unknown;
     aiTags?: unknown;
   };
   try {
@@ -358,12 +372,31 @@ libraryRoutes.put("/:id", async (c) => {
         body.aiTags.filter((t): t is string => typeof t === "string"),
       )
     : current.ai_tags;
+  // M8-07: provenance is stored as JSON text; an explicit null clears it.
+  const currentSources =
+    (current as { ai_summary_sources?: string | null }).ai_summary_sources ??
+    null;
+  const aiSummarySources =
+    body.aiSummarySources === null
+      ? null
+      : Array.isArray(body.aiSummarySources)
+        ? JSON.stringify(body.aiSummarySources.slice(0, 32))
+        : currentSources;
 
   const nextVersion = Number(current.version) + 1;
   const nowIso = new Date().toISOString();
   db.prepare(
-    `UPDATE saved_repositories SET note = ?, status = ?, ai_summary = ?, ai_tags = ?, version = ?, updated_at = ? WHERE id = ?`,
-  ).run(note, status, aiSummary, aiTags, nextVersion, nowIso, id);
+    `UPDATE saved_repositories SET note = ?, status = ?, ai_summary = ?, ai_summary_sources = ?, ai_tags = ?, version = ?, updated_at = ? WHERE id = ?`,
+  ).run(
+    note,
+    status,
+    aiSummary,
+    aiSummarySources,
+    aiTags,
+    nextVersion,
+    nowIso,
+    id,
+  );
   recordChange(userId, "saved_repository", id, "updated", nextVersion);
 
   const row = db
