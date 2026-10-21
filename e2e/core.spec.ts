@@ -46,7 +46,8 @@ test("interactive controls expose accessible names", async ({ page }) => {
     nodes
       .filter((node) => {
         const el = node as HTMLButtonElement;
-        if (el.hidden || el.getAttribute("aria-hidden") === "true") return false;
+        if (el.hidden || el.getAttribute("aria-hidden") === "true")
+          return false;
         const name =
           el.getAttribute("aria-label") ||
           el.textContent?.trim() ||
