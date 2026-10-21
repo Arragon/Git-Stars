@@ -20,12 +20,15 @@
     "migration:check": "tsx scripts/migration-check.ts",
     "release:manifest": "node scripts/release-manifest.mjs",
     "seed:public": "tsx scripts/seed-public-fixtures.ts",
-    "drill:backup": "tsx scripts/drill-backup-restore.ts"
+    "drill:backup": "tsx scripts/drill-backup-restore.ts",
+    "test:e2e": "npm run build && playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "axios": "^1.13.6",
     "clsx": "^2.1.1",
+    "cross-env": "^7.0.3",
     "date-fns": "^4.1.0",
     "dotenv": "^17.3.1",
     "hono": "^4.6.14",
@@ -35,12 +38,12 @@
     "react-router-dom": "^7.3.0",
     "recharts": "^3.8.0",
     "tailwind-merge": "^3.0.2",
-    "zustand": "^5.0.3",
-    "cross-env": "^7.0.3",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "zustand": "^5.0.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",
+    "@playwright/test": "^1.64.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.15.30",
     "@types/react": "^18.3.12",

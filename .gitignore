@@ -33,3 +33,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# E2E artifacts
+tmp/
+e2e-report/
+test-results/
+playwright-report/
