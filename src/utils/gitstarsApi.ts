@@ -237,10 +237,19 @@ export const getRepository = (id: string, refresh = false) =>
   apiGet<RepositoryDetailView>(
     `/api/repositories/${id}${refresh ? "?refresh=1" : ""}`,
   );
+// M8-05 content identity: `sha256`/`fetchedAt` let the client detect staleness
+// and show freshness without re-rendering unchanged content.
+export interface ReadmeView {
+  path: string;
+  format: string;
+  content: string;
+  ref: string;
+  etag?: string;
+  sha256: string;
+  fetchedAt: string;
+}
 export const getReadme = (id: string) =>
-  apiGet<{ path: string; format: string; content: string }>(
-    `/api/repositories/${id}/readme`,
-  );
+  apiGet<ReadmeView>(`/api/repositories/${id}/readme`);
 export interface TreeEntryView {
   path: string;
   type: "file" | "dir";

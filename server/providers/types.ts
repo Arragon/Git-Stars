@@ -52,6 +52,14 @@ export interface ReadmeResult {
   // Content is the raw source (markdown/text). Rendering + sanitization happens in the client.
   format: "markdown" | "text";
   content: string;
+  // M8-05 content identity: lets clients cache the README and detect staleness
+  // without re-fetching. `ref` is the ref the content was read at, `etag` the
+  // upstream validator when the provider sends one, `sha256` a local digest of
+  // the content, `fetchedAt` the server time of this read.
+  ref: string;
+  etag?: string;
+  sha256: string;
+  fetchedAt: string;
 }
 
 export interface TreeEntry {

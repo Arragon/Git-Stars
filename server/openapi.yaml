@@ -277,7 +277,17 @@ paths:
           description: Sanitized README payload
           content:
             application/json:
-              schema: { type: object, additionalProperties: true }
+              schema:
+                type: object
+                required: [path, format, content, ref, sha256, fetchedAt]
+                properties:
+                  path: { type: string }
+                  format: { type: string, enum: [markdown, text] }
+                  content: { type: string }
+                  ref: { type: string, description: "Ref the content was read at (e.g. HEAD)" }
+                  etag: { type: string, description: "Upstream validator when the provider sends one" }
+                  sha256: { type: string, description: "Server-computed SHA-256 of `content`" }
+                  fetchedAt: { type: string, format: date-time }
         "404": { $ref: "#/components/responses/Error404" }
         "501": { $ref: "#/components/responses/Error501" }
   /repositories/{id}/tree:
