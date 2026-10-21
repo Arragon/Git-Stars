@@ -68,9 +68,15 @@ publicationRoutes.post("/lists/:id/publication", async (c) => {
 
 publicationRoutes.get("/lists/:id/publication", (c) => {
   const userId = c.get("userId");
-  const row = getPublicationRow(userId, { listId: c.req.param("id") });
+  const listId = c.req.param("id");
+  const row = getPublicationRow(userId, { listId });
   if (!row) return apiError(c, 404, "NOT_FOUND", "List not published");
-  return c.json(serializePublication(row));
+  // Compare the live list with the snapshot timestamp so the UI can say
+  // "有未发布的修改" instead of implying the public page is current (M8-12).
+  const list = getDb()
+    .prepare("SELECT updated_at FROM lists WHERE id = ? AND user_id = ?")
+    .get(listId, userId) as unknown as { updated_at: string } | undefined;
+  return c.json(serializePublication(row, list?.updated_at ?? null));
 });
 
 publicationRoutes.delete("/lists/:id/publication", (c) => {

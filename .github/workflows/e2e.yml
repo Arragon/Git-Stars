@@ -1,0 +1,33 @@
+name: E2E (nightly)
+
+# M8-10: real-browser + accessibility evidence. Nightly/manual by design: it needs a
+# browser download and a seeded database, and must not block day-to-day PR latency.
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      SESSION_SECRET: e2e-ci-only-not-a-real-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npx playwright test
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: |
+            e2e-report/
+            test-results/
+          if-no-files-found: ignore

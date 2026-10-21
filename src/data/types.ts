@@ -30,6 +30,9 @@ export interface CachedSavedRepository {
   repositoryId: string;
   status: string;
   note?: string;
+  /** Needed by offline filters/sorting (M8-03): previously dropped from the cache. */
+  aiSummary?: string;
+  kinds?: string[];
   aiTags: string[];
   version: number;
   etag: string;
@@ -116,6 +119,8 @@ export interface QueuedMutation {
   createsTempId?: string;
   /** Temp ids referenced by the payload; resolved through `idMap` before sending. */
   refs?: string[];
+  /** Owning app user; entries never replay under a different account (M8-X). */
+  ownerId?: string;
 }
 
 /**
@@ -129,6 +134,8 @@ export interface IdMapEntry {
   version: number;
   etag?: string;
   createdAt: string;
+  /** Owning app user (M8-X); legacy entries without it are claimed on first use. */
+  ownerId?: string;
 }
 
 // --- Store names ---

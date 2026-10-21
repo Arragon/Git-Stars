@@ -554,11 +554,27 @@ CREATE TABLE IF NOT EXISTS account_deletions (
 `);
 }
 
+function migrationV5(db: DatabaseSync): void {
+  // M8-01: OAuth state is persisted together with its post-login destination, so a
+  // restart between redirect and callback does not lose the return path. Rows are
+  // one-time and TTL-checked by the auth route.
+  db.exec(`
+CREATE TABLE IF NOT EXISTS oauth_states (
+  state TEXT PRIMARY KEY,
+  return_to TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_oauth_states_expires ON oauth_states(expires_at);
+`);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "new_domain_tables_and_backfill", up: migrationV1 },
   { version: 2, name: "list_items_position_key_fractional", up: migrationV2 },
   { version: 3, name: "publications_hub_audit", up: migrationV3 },
   { version: 4, name: "account_deletion_state", up: migrationV4 },
+  { version: 5, name: "oauth_states_with_return_to", up: migrationV5 },
 ];
 
 export function latestSchemaVersion(): number {

@@ -39,6 +39,7 @@ import type {
 } from "./types";
 import { mutationQueue, conflictLog, buildIfMatch } from "../sync/syncClient";
 import { createIdResolver } from "../sync/idMap";
+import { getAccountScope } from "../sync/accountScope";
 import { ApiError, apiDelete, apiPut, apiPost } from "../utils/api";
 import type {
   ListDetail,
@@ -130,6 +131,7 @@ async function enqueueAndAttempt<T>(
         status: "pending",
         ...(spec.createsTempId ? { createsTempId: spec.createsTempId } : {}),
         ...(spec.refs && spec.refs.length > 0 ? { refs: spec.refs } : {}),
+        ...(getAccountScope() ? { ownerId: getAccountScope()! } : {}),
       };
       tx.put<QueuedMutation>("mutationQueue", entry);
     },
@@ -268,6 +270,8 @@ export async function readLibraryCache(): Promise<{
       etag: s.etag,
       status: s.status,
       note: s.note,
+      aiSummary: s.aiSummary,
+      kinds: s.kinds ?? [],
       aiTags: s.aiTags,
       addedAt: s.addedAt,
       updatedAt: s.updatedAt,
@@ -490,6 +494,8 @@ export async function upsertLibraryPage(
           repositoryId: item.repository.id,
           status: item.status,
           note: item.note,
+          aiSummary: item.aiSummary,
+          kinds: item.kinds,
           aiTags: item.aiTags,
           version: item.version,
           etag: item.etag,
@@ -618,9 +624,24 @@ export async function upsertRepositoryDetail(
     "readwrite",
     async (tx) => {
       const existing = await tx.get<CachedRepository>("repositories", view.id);
+      // The detail view nests identity (`identity.providerType/...`); the cache
+      // stores it flat, so flatten here (M8-10 e2e crash fix).
       tx.put<CachedRepository>("repositories", {
         ...(existing ?? {}),
-        ...toProjection(view),
+        id: view.id,
+        providerType: view.identity.providerType,
+        host: view.identity.host,
+        remoteId: view.identity.remoteId,
+        canonicalKey: view.canonicalKey,
+        name: view.name,
+        namespacePath: view.namespacePath,
+        webUrl: view.webUrl,
+        description: view.description,
+        visibility: view.visibility,
+        primaryLanguage: view.primaryLanguage,
+        starsCount: view.starsCount,
+        forksCount: view.forksCount,
+        status: view.status,
         cachedAt: nowIso(),
       });
       if (view.saved) {

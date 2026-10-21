@@ -25,6 +25,36 @@ export class AiClientError extends Error {
   }
 }
 
+/** Thrown when the caller aborts an in-flight AI request (M8-08). */
+export class AiAbortError extends AiClientError {
+  constructor(message = "AI 请求已取消") {
+    super(message);
+    this.name = "AiAbortError";
+  }
+}
+
+interface AbortGuard {
+  signal: AbortSignal;
+  cleanup: () => void;
+}
+
+function createAbortGuard(
+  external: AbortSignal | undefined,
+  timeoutMs: number,
+): AbortGuard {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onAbort = () => controller.abort();
+  external?.addEventListener("abort", onAbort, { once: true });
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      external?.removeEventListener("abort", onAbort);
+    },
+  };
+}
+
 function truncateForError(text: string, maxLen = 240): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   return normalized.length > maxLen
@@ -78,10 +108,15 @@ async function parseJsonOrThrow(
 
 // --- Chat completion (normalized) ---
 
-export async function aiChatComplete(
+async function runChatComplete(
   cfg: AiClientConfig,
   prompt: string,
-  opts: { jsonMode?: boolean; temperature?: number } = {},
+  opts: {
+    jsonMode?: boolean;
+    temperature?: number;
+    signal?: AbortSignal;
+  },
+  signal: AbortSignal,
 ): Promise<string> {
   requireFields(cfg);
   const preset = getPreset(cfg.presetId);
@@ -92,6 +127,7 @@ export async function aiChatComplete(
   if (flavor === "anthropic") {
     const response = await fetch(joinUrl(base, "/messages"), {
       method: "POST",
+      signal,
       headers: {
         "Content-Type": "application/json",
         "x-api-key": cfg.apiKey,
@@ -120,6 +156,7 @@ export async function aiChatComplete(
       joinUrl(base, `/models/${encodeURIComponent(cfg.model)}:generateContent`),
       {
         method: "POST",
+        signal,
         headers: {
           "Content-Type": "application/json",
           "x-goog-api-key": cfg.apiKey,
@@ -149,6 +186,7 @@ export async function aiChatComplete(
   });
   let response = await fetch(joinUrl(base, "/chat/completions"), {
     method: "POST",
+    signal,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${cfg.apiKey}`,
@@ -161,6 +199,7 @@ export async function aiChatComplete(
     if (/response_format|json_object/i.test(errorText)) {
       response = await fetch(joinUrl(base, "/chat/completions"), {
         method: "POST",
+        signal,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${cfg.apiKey}`,
@@ -239,4 +278,32 @@ export async function listAiModels(cfg: AiClientConfig): Promise<string[]> {
     );
   }
   return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Guarded entry point (M8-08): enforces a timeout and turns an external abort into
+ * AiAbortError so callers can distinguish "user cancelled" from a provider failure.
+ */
+export async function aiChatComplete(
+  cfg: AiClientConfig,
+  prompt: string,
+  opts: {
+    jsonMode?: boolean;
+    temperature?: number;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  } = {},
+): Promise<string> {
+  const guard = createAbortGuard(opts.signal, opts.timeoutMs ?? 60_000);
+  try {
+    return await runChatComplete(cfg, prompt, opts, guard.signal);
+  } catch (error) {
+    if (guard.signal.aborted) {
+      if (opts.signal?.aborted) throw new AiAbortError();
+      throw new AiClientError("AI 请求超时，请重试");
+    }
+    throw error;
+  } finally {
+    guard.cleanup();
+  }
 }

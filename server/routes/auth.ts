@@ -23,27 +23,41 @@ import {
   SESSION_COOKIE_NAME,
 } from "../session.js";
 import { currentUser } from "../middleware/auth.js";
+import { DEFAULT_RETURN_TO, sanitizeReturnTo } from "../lib/returnTo.js";
 import { upsertProviderAccount } from "../services/credentials.js";
 
 const OAUTH_STATE_TTL_MS = 5 * 60 * 1000;
-const oauthStates = new Map<string, number>();
 
-function issueState(): string {
+// State is persisted with its destination (M8-01): a restart between redirect and
+// callback must not break sign-in, and the destination is validated before storage.
+function issueState(returnTo: string): string {
+  const db = getDb();
   const now = Date.now();
-  for (const [state, expiresAt] of oauthStates) {
-    if (expiresAt < now) oauthStates.delete(state);
-  }
+  db.prepare("DELETE FROM oauth_states WHERE expires_at < ?").run(now);
   const state = randomUUID();
-  oauthStates.set(state, now + OAUTH_STATE_TTL_MS);
+  db.prepare(
+    `INSERT INTO oauth_states (state, return_to, expires_at, created_at)
+     VALUES (?, ?, ?, ?)`,
+  ).run(state, returnTo, now + OAUTH_STATE_TTL_MS, new Date().toISOString());
   return state;
 }
 
-function consumeState(state: string | undefined | null): boolean {
-  if (!state) return false;
-  const expiresAt = oauthStates.get(state);
-  if (!expiresAt) return false;
-  oauthStates.delete(state);
-  return expiresAt >= Date.now();
+function consumeState(state: string | undefined | null): {
+  ok: boolean;
+  returnTo: string;
+} {
+  if (!state) return { ok: false, returnTo: DEFAULT_RETURN_TO };
+  const db = getDb();
+  const row = db
+    .prepare("SELECT return_to, expires_at FROM oauth_states WHERE state = ?")
+    .get(state) as unknown as
+    { return_to: string; expires_at: number } | undefined;
+  if (!row) return { ok: false, returnTo: DEFAULT_RETURN_TO };
+  db.prepare("DELETE FROM oauth_states WHERE state = ?").run(state);
+  return {
+    ok: Number(row.expires_at) >= Date.now(),
+    returnTo: sanitizeReturnTo(row.return_to),
+  };
 }
 
 export function toSessionUser(row: {
@@ -162,7 +176,8 @@ authRoutes.get("/github/login", (c) => {
       503,
     );
   }
-  const state = issueState();
+  const returnTo = sanitizeReturnTo(c.req.query("returnTo"));
+  const state = issueState(returnTo);
   const url = buildAuthorizeUrl(state, redirectUri());
   return c.redirect(url, 302);
 });
@@ -172,14 +187,23 @@ authRoutes.get("/github/callback", async (c) => {
   const state = c.req.query("state");
   const errorParam = c.req.query("error");
 
+  // Consume once, then use the stored destination for both success and failure paths so
+  // the user can retry the same task after a denial or transient error.
+  const consumed = consumeState(state);
+  const returnTo = consumed.returnTo;
+  const withReturnTo = (base: string) =>
+    `${base}${base.includes("?") ? "&" : "?"}returnTo=${encodeURIComponent(returnTo)}`;
+
   if (errorParam) {
     return c.redirect(
-      `/?error=oauth_denied&detail=${encodeURIComponent(errorParam)}`,
+      withReturnTo(
+        `/?error=oauth_denied&detail=${encodeURIComponent(errorParam)}`,
+      ),
       302,
     );
   }
-  if (!code || !consumeState(state)) {
-    return c.redirect("/?error=oauth_state_invalid", 302);
+  if (!code || !consumed.ok) {
+    return c.redirect(withReturnTo("/?error=oauth_state_invalid"), 302);
   }
 
   try {
@@ -198,7 +222,7 @@ authRoutes.get("/github/callback", async (c) => {
     });
 
     if (conflict) {
-      return c.redirect("/?error=identity_conflict", 302);
+      return c.redirect(withReturnTo("/?error=identity_conflict"), 302);
     }
 
     // Store the provider token encrypted in the vault (ADR-0005 D3); never in users.access_token.
@@ -217,23 +241,23 @@ authRoutes.get("/github/callback", async (c) => {
       "Set-Cookie",
       buildCookieHeader(encodeCookieValue(session.id), session.expiresAt),
     );
-    return c.redirect("/library", 302);
+    return c.redirect(returnTo, 302);
   } catch (error) {
     if (error instanceof GitHubRateLimitError) {
-      return c.redirect("/?error=github_rate_limit", 302);
+      return c.redirect(withReturnTo("/?error=github_rate_limit"), 302);
     }
     if (error instanceof GitHubApiError) {
       return c.redirect(
-        `/?error=${encodeURIComponent(error.code.toLowerCase())}`,
+        withReturnTo(`/?error=${encodeURIComponent(error.code.toLowerCase())}`),
         302,
       );
     }
     console.error("[auth] GitHub callback failed:", error);
-    return c.redirect("/?error=oauth_failed", 302);
+    return c.redirect(withReturnTo("/?error=oauth_failed"), 302);
   }
 });
 
-authRoutes.post("/dev-login", (c) => {
+authRoutes.post("/dev-login", async (c) => {
   if (!devLoginEnabled) {
     return c.json(
       {
@@ -244,6 +268,11 @@ authRoutes.post("/dev-login", (c) => {
     );
   }
   const username = env.localDevUser;
+  // Dev login mirrors the OAuth destination contract so both paths behave identically.
+  const body = (await c.req.json().catch(() => ({}))) as {
+    returnTo?: unknown;
+  };
+  const returnTo = sanitizeReturnTo(body?.returnTo);
   const { id } = upsertUserByGithubId({
     githubId: `dev:${username}`,
     username,
@@ -266,6 +295,7 @@ authRoutes.post("/dev-login", (c) => {
   );
   return c.json({
     ok: true,
+    returnTo,
     user: toSessionUser({
       id,
       github_id: `dev:${username}`,

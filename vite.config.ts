@@ -6,6 +6,9 @@ import tsconfigPaths from "vite-tsconfig-paths";
 export default defineConfig({
   build: {
     sourcemap: "hidden",
+    // Some restricted environments intercept fs.rmSync (safe-delete shims), which breaks
+    // Vite's emptyDir. Opt out explicitly when building there; CI keeps the default.
+    emptyOutDir: !process.env.VITE_SKIP_EMPTY_OUT_DIR,
   },
   server: {
     port: 5173,

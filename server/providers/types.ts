@@ -170,6 +170,15 @@ export interface RepositoryProvider {
     identity: RepositoryIdentity,
     ctx: ProviderConnectionContext,
   ): Promise<RepositorySnapshot>;
+
+  /**
+   * Resolve a human-entered "owner/repo" path to a snapshot (M8-02). Optional because
+   * providers without a path-addressed repository endpoint cannot support it.
+   */
+  resolveRepository?(
+    path: string,
+    ctx: ProviderConnectionContext,
+  ): Promise<RepositorySnapshot>;
   listMemberships(
     ctx: ProviderConnectionContext,
     kind: MembershipKind,

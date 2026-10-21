@@ -9,7 +9,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Bookmark,
   RefreshCw,
@@ -24,6 +24,7 @@ import {
   listLibrary,
   listLists,
   listTags,
+  resolveRepositoryUrl,
   searchRepositories,
   syncProvider,
   updateSaved,
@@ -33,7 +34,12 @@ import {
   type Tag,
 } from "../utils/gitstarsApi";
 import { ApiError, apiPut } from "../utils/api";
+import {
+  parseLibraryRoute,
+  serializeLibraryRoute,
+} from "../lib/libraryRouteState";
 import { summarizeProject } from "../utils/ai";
+import { AiAbortError } from "../ai/client";
 import { useAiConfigStore } from "../store/useAiConfigStore";
 import {
   matchCachedRepository,
@@ -136,7 +142,12 @@ export const Library: React.FC = () => {
   const [items, setItems] = useState<SavedRepository[]>([]);
   const [allItems, setAllItems] = useState<SavedRepository[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
-  const [filters, setFilters] = useState<LibraryFilters>(EMPTY_LIBRARY_FILTERS);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // M8-04: the URL is the source of truth for query/filters, so back/forward and a
+  // shared link both restore the same visible set.
+  const [filters, setFilters] = useState<LibraryFilters>(() =>
+    parseLibraryRoute(searchParams.toString()),
+  );
   // Honor the 默认浏览方式 preference saved in Settings (localStorage).
   const [view, setView] = useState<"grid" | "list">(() => {
     try {
@@ -157,6 +168,8 @@ export const Library: React.FC = () => {
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
+  const [resolvingUrl, setResolvingUrl] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [noteFor, setNoteFor] = useState<SavedRepository | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -186,6 +199,7 @@ export const Library: React.FC = () => {
   const [batch, setBatch] = useState<BatchState | null>(null);
   const [batchOpen, setBatchOpen] = useState(false);
   const batchStopRef = useRef(false);
+  const batchAbortRef = useRef<AbortController | null>(null);
   const itemsRef = useRef<SavedRepository[]>([]);
   itemsRef.current = items;
 
@@ -198,30 +212,33 @@ export const Library: React.FC = () => {
     (filters.tag ? 1 : 0) +
     filters.aiTags.length;
 
+  // One generation counter guards cache reads and server reloads: a slow response from
+  // an older request must never overwrite a newer snapshot (M8-03).
+  const cacheGen = useRef(0);
+
   const hydrateFromCache = useCallback(async () => {
+    const gen = ++cacheGen.current;
     try {
       const cache = await readLibraryCache();
+      if (gen !== cacheGen.current) return;
       setAllItems(cache.items);
-      setItems(applyLibraryFilters(cache.items, filters));
       setTags(cache.tags);
     } catch {
       // server fetch path still applies
     }
-  }, [filters]);
+  }, []);
 
+  // Fetch the FULL library snapshot once; provider/tag/sort are derived locally so
+  // filtering never turns into a server round-trip (M8-03).
   const reload = useCallback(async () => {
+    const gen = ++cacheGen.current;
     try {
       const [lib, tg] = await Promise.all([
-        listLibrary({
-          provider: filters.provider,
-          tag: filters.tag,
-          sort: filters.sort,
-          order: "desc",
-        }),
+        listLibrary({ order: "desc" }),
         listTags(),
       ]);
+      if (gen !== cacheGen.current) return;
       setAllItems(lib);
-      setItems(applyLibraryFilters(lib, filters));
       setTags(tg);
       setError("");
       setNotice("");
@@ -231,6 +248,7 @@ export const Library: React.FC = () => {
         // best-effort
       }
     } catch (e) {
+      if (gen !== cacheGen.current) return;
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         setNotice("离线：正在显示本地缓存");
         setError("");
@@ -243,7 +261,7 @@ export const Library: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [filters, hydrateFromCache]);
+  }, [hydrateFromCache]);
 
   useEffect(() => {
     if (mountedRef.current) return;
@@ -254,6 +272,34 @@ export const Library: React.FC = () => {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Derived visible set: pure local filter/sort over the snapshot.
+  useEffect(() => {
+    setItems(applyLibraryFilters(allItems, filters));
+  }, [allItems, filters]);
+
+  // Reflect filters into the URL (replace, so typing does not spam history).
+  useEffect(() => {
+    const target = new URLSearchParams(
+      serializeLibraryRoute(filters),
+    ).toString();
+    if (target !== searchParams.toString()) {
+      setSearchParams(target, { replace: true });
+    }
+  }, [filters, searchParams, setSearchParams]);
+
+  // Restore the scroll position for this exact filter state, and keep it updated so
+  // returning from Repository View lands where the user left.
+  useEffect(() => {
+    const key = `library:scroll:${serializeLibraryRoute(filters)}`;
+    const saved = Number(sessionStorage.getItem(key) ?? "0");
+    if (saved > 0) {
+      requestAnimationFrame(() => window.scrollTo(0, saved));
+    }
+    const onScroll = () => sessionStorage.setItem(key, String(window.scrollY));
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [filters]);
 
   const loadLists = useCallback(async () => {
     try {
@@ -321,15 +367,19 @@ export const Library: React.FC = () => {
     void mutate(fn).finally(() => setBusy(false));
   };
 
+  const searchGen = useRef(0);
+
   const onSearch = async () => {
     if (!query.trim()) {
       setResults(null);
       setSaveable(new Map());
       return;
     }
+    const gen = ++searchGen.current;
     setBusy(true);
     try {
       const r = await searchRepositories(query.trim());
+      if (gen !== searchGen.current) return;
       setResults(r.items);
       const map = new Map<string, string>();
       for (const item of r.items) {
@@ -343,13 +393,15 @@ export const Library: React.FC = () => {
           /* cache unavailable */
         }
       }
+      if (gen !== searchGen.current) return;
       setSaveable(map);
     } catch (e) {
+      if (gen !== searchGen.current) return;
       setError(
         e instanceof ApiError ? `${e.code}: ${e.message}` : "搜索失败，请重试",
       );
     } finally {
-      setBusy(false);
+      if (gen === searchGen.current) setBusy(false);
     }
   };
 
@@ -367,6 +419,34 @@ export const Library: React.FC = () => {
       setNotice("离线：更改已保存到本地，联网后自动同步");
     else await reload();
     setSavingKey(null);
+  };
+
+  /** Resolve a pasted GitHub URL and save it in one step (M8-02). */
+  const onResolveUrl = async () => {
+    const value = urlInput.trim();
+    if (!value || resolvingUrl) return;
+    setResolvingUrl(true);
+    setError("");
+    try {
+      const res = await resolveRepositoryUrl(value);
+      if (!res.repository) throw new Error("resolve failed");
+      if (!res.repository.saved) {
+        const out = await saveRepositoryFromLibrary(res.repositoryId);
+        if (out.error) throw out.error;
+      }
+      setDiscoverOpen(false);
+      setUrlInput("");
+      await reload();
+      showToast("已加入收藏库");
+    } catch (e) {
+      setError(
+        e instanceof ApiError
+          ? `${e.code}: ${e.message}`
+          : "无法解析该链接，请检查后重试",
+      );
+    } finally {
+      setResolvingUrl(false);
+    }
   };
 
   /**
@@ -452,6 +532,7 @@ export const Library: React.FC = () => {
       return;
     }
     batchStopRef.current = false;
+    batchAbortRef.current = new AbortController();
     setBatch({ mode, total: targets.length, done: 0, failed: 0, current: "" });
     setBatchOpen(false);
     let done = 0;
@@ -466,6 +547,7 @@ export const Library: React.FC = () => {
           it.repository.description ?? "",
           it.repository.primaryLanguage ?? "",
           it.tags.map((t) => t.name),
+          { signal: batchAbortRef.current?.signal },
         );
         const res = await updateSaved(
           it.id,
@@ -484,7 +566,9 @@ export const Library: React.FC = () => {
               : row,
           ),
         );
-      } catch {
+      } catch (error) {
+        // A user cancel is not a failure: stop without counting the item (M8-08).
+        if (error instanceof AiAbortError) break;
         failed++;
       }
       done++;
@@ -612,6 +696,7 @@ export const Library: React.FC = () => {
               size="xs"
               onClick={() => {
                 batchStopRef.current = true;
+                batchAbortRef.current?.abort();
               }}
             >
               暂停
@@ -642,9 +727,27 @@ export const Library: React.FC = () => {
         width="560px"
       >
         <p className="text-xs text-muted mb-4">
-          这里搜索来源平台。收藏库顶部的搜索只检索已经保存的内容。
+          粘贴 GitHub
+          链接可直接保存；按关键词搜索会查询来源平台。收藏库顶部的搜索只检索已经保存的内容。
         </p>
         <div className="row">
+          <Input
+            placeholder="粘贴链接，如 https://github.com/honojs/hono"
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void onResolveUrl();
+            }}
+          />
+          <Button
+            variant="secondary"
+            disabled={!isOnline || resolvingUrl}
+            onClick={() => void onResolveUrl()}
+          >
+            {resolvingUrl ? "解析中…" : "从链接添加"}
+          </Button>
+        </div>
+        <div className="row mt-4">
           <Input
             placeholder="搜索关键词，如 backend"
             value={query}
@@ -1149,7 +1252,9 @@ export const Library: React.FC = () => {
                       <div className="repo-name-wrap">
                         <Link
                           className="repo-title"
-                          to={`/repository/${it.repository.id}`}
+                          to={`/repository/${it.repository.id}?from=${encodeURIComponent(
+                            `/library${serializeLibraryRoute(filters)}`,
+                          )}`}
                         >
                           {it.repository.name}
                         </Link>
@@ -1281,7 +1386,9 @@ export const Library: React.FC = () => {
                       <div className="grow">
                         <Link
                           className="repo-title"
-                          to={`/repository/${it.repository.id}`}
+                          to={`/repository/${it.repository.id}?from=${encodeURIComponent(
+                            `/library${serializeLibraryRoute(filters)}`,
+                          )}`}
                         >
                           {it.repository.namespacePath
                             ? `${it.repository.namespacePath}/`

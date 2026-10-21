@@ -37,6 +37,7 @@ import {
   publish,
   recordReport,
   revoke,
+  serializePublication,
   setHubOptIn,
   snapshotToPortable,
   takedown,
@@ -592,5 +593,36 @@ describe("publication service (M5)", () => {
     const json = JSON.stringify(doc);
     expect(json).not.toContain(NOTE_TEXT);
     expect(json).not.toContain(TAG_NAME);
+  });
+});
+
+describe("publication freshness flag (M8-12)", () => {
+  const row = {
+    id: "pub-1",
+    status: "active",
+    snapshot_version: 2,
+    title: "List",
+    repository_count: 3,
+    updated_at: "2026-02-01T00:00:00.000Z",
+    hub_opt_in: 0,
+  } as never;
+
+  it("reports unpublished changes when the list is newer than the snapshot", () => {
+    expect(serializePublication(row, "2026-02-02T00:00:00.000Z")).toMatchObject(
+      {
+        hasUnpublishedChanges: true,
+      },
+    );
+  });
+
+  it("reports no changes when the snapshot is current", () => {
+    expect(serializePublication(row, "2026-02-01T00:00:00.000Z")).toMatchObject(
+      {
+        hasUnpublishedChanges: false,
+      },
+    );
+    expect(serializePublication(row, null)).toMatchObject({
+      hasUnpublishedChanges: false,
+    });
   });
 });

@@ -6,7 +6,7 @@
 // note + tag mutations via offline helpers, AI summary regeneration.
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowLeft,
@@ -60,6 +60,8 @@ import {
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
 import { useToastStore } from "../store/useToastStore";
 import { useSyncDrawerStore } from "../store/useSyncDrawerStore";
+import { useAuthStore } from "../store/useAuthStore";
+import { clearDraft, readDraft, saveDraft } from "../data/drafts";
 import {
   INITIAL_NOTE_SAVE,
   noteSaveReducer,
@@ -70,6 +72,7 @@ import {
 import { ActivityBadge } from "../components/ActivityBadge";
 import { Dialog, EmptyState, SkeletonCard } from "../components/ui";
 import { repoEmblem } from "../lib/utils";
+import { safeReturnPath } from "../lib/libraryRouteState";
 
 type Tab = "readme" | "files" | "releases";
 
@@ -87,6 +90,9 @@ const friendly = (e: unknown, fallback: string): string =>
 export const RepositoryView: React.FC = () => {
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // M8-04: return to the exact Library filter/scroll context the user came from.
+  const returnTo = safeReturnPath(searchParams.get("from"));
   const showToast = useToastStore((s) => s.showToast);
   const [repo, setRepo] = useState<RepositoryDetailView | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -106,16 +112,42 @@ export const RepositoryView: React.FC = () => {
   const lastSyncedNote = useRef<string | null>(null);
 
   // Mirror the authoritative note into the draft, but never clobber a failed/conflicted
-  // draft that the user still needs to recover (M7-14).
+  // draft that the user still needs to recover (M7-14). A locally buffered draft wins
+  // over the server copy until it is saved or discarded (M8-06).
   useEffect(() => {
     if (noteState.status === "failed" || noteState.status === "conflict")
       return;
     const value = repo?.saved?.note ?? "";
-    if (value !== lastSyncedNote.current) {
-      lastSyncedNote.current = value;
+    if (value === lastSyncedNote.current) return;
+    lastSyncedNote.current = value;
+    const savedId = repo?.saved?.id;
+    const draft = savedId
+      ? readDraft(
+          useAuthStore.getState().user?.id ?? "anon",
+          "saved_repository",
+          savedId,
+        )
+      : null;
+    if (draft !== null && draft !== value) {
+      setNoteDraft(draft);
+      setNoteState({ status: "draft" });
+    } else {
       setNoteDraft(value);
     }
-  }, [repo?.saved?.note, noteState.status]);
+  }, [repo?.saved?.note, repo?.saved?.id, noteState.status]);
+
+  // Debounced draft persistence: text survives refresh/route changes even before blur.
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queueDraft = (value: string) => {
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => {
+      if (!repo?.saved) return;
+      const saved = repo.saved.note ?? "";
+      const owner = useAuthStore.getState().user?.id ?? "anon";
+      if (value === saved) clearDraft(owner, "saved_repository", repo.saved.id);
+      else saveDraft(owner, "saved_repository", repo.saved.id, value);
+    }, 700);
+  };
 
   const [readme, setReadme] = useState<string | null>(null);
   const [entries, setEntries] = useState<TreeEntryView[] | null>(null);
@@ -126,15 +158,42 @@ export const RepositoryView: React.FC = () => {
   const [releases, setReleases] = useState<ReleaseView[] | null>(null);
 
   /** Cache-first hydration of the saved/note/tags state (INH-406). */
+  // M8-05: A -> B navigation must never keep A's README/files/releases on screen.
+  useEffect(() => {
+    setReadme(null);
+    setEntries(null);
+    setFile(null);
+    setReleases(null);
+    setDirPath("");
+  }, [id]);
+
   const hydrate = useCallback(async () => {
     try {
       const cached = await readRepositorySavedCache(id);
       setTags(cached.tags);
       if (!cached.repo) return;
+      const cr = cached.repo;
       setRepo((current) => {
         if (current) return current; // server data wins once loaded
+        // The cache stores identity flat (CachedRepository); the detail view nests it.
         return {
-          ...cached.repo!,
+          id: cr.id,
+          identity: {
+            providerType: cr.providerType,
+            host: cr.host,
+            remoteId: cr.remoteId,
+          },
+          canonicalKey: cr.canonicalKey,
+          name: cr.name,
+          namespacePath: cr.namespacePath,
+          webUrl: cr.webUrl,
+          description: cr.description,
+          visibility: cr.visibility,
+          primaryLanguage: cr.primaryLanguage,
+          starsCount: cr.starsCount,
+          forksCount: cr.forksCount,
+          status: cr.status,
+          metadataFetchedAt: cr.metadataFetchedAt,
           capabilities: null,
           saved: cached.saved
             ? {
@@ -341,6 +400,38 @@ export const RepositoryView: React.FC = () => {
     }
   };
 
+  /** Adopt an AI tag as a manual tag (M8-06): additive only, never renames user tags. */
+  const adoptAiTag = async (name: string) => {
+    if (!repo?.saved) return;
+    const existing = tags.find((t) => t.name === name);
+    if (!existing && !isOnline) {
+      setError("离线状态暂不支持新建标签，请联网后重试");
+      return;
+    }
+    try {
+      const tag = existing ?? (await createTag(name));
+      await act(
+        () => attachTagToSaved(repo.saved!.id, tag.id),
+        () =>
+          setRepo((current) =>
+            current?.saved
+              ? {
+                  ...current,
+                  saved: {
+                    ...current.saved,
+                    tags: current.saved.tags.some((t) => t.id === tag.id)
+                      ? current.saved.tags
+                      : [...current.saved.tags, { id: tag.id, name: tag.name }],
+                  },
+                }
+              : current,
+          ),
+      );
+    } catch (e) {
+      setError(friendly(e, "标签添加失败"));
+    }
+  };
+
   /** Persist the note draft with honest, field-level status (M7-14 / INH-1708). */
   const saveNote = async (value: string) => {
     if (!repo?.saved) return;
@@ -371,6 +462,11 @@ export const RepositoryView: React.FC = () => {
               : current,
           );
           setNoteState({ status: "confirmed" });
+          clearDraft(
+            useAuthStore.getState().user?.id ?? "anon",
+            "saved_repository",
+            repo.saved!.id,
+          );
         } else if (status === "conflict") {
           setNoteState({ status: "conflict", error: outcomeErrorLabel(out) });
         } else if (status === "failed") {
@@ -419,6 +515,15 @@ export const RepositoryView: React.FC = () => {
   return (
     <div>
       <div className="reader-head">
+        <button
+          type="button"
+          className="btn ghost sm"
+          title="返回"
+          aria-label="返回收藏库"
+          onClick={() => navigate(returnTo)}
+        >
+          <ArrowLeft className="ico" /> 返回收藏库
+        </button>
         <span className={`repo-emblem ${emblem.toneCls}`}>
           {emblem.initials}
         </span>
@@ -552,7 +657,7 @@ export const RepositoryView: React.FC = () => {
                 <button
                   type="button"
                   className="btn primary"
-                  onClick={() => navigate("/library")}
+                  onClick={() => navigate(returnTo)}
                 >
                   <ArrowLeft className="ico" /> 返回收藏库
                 </button>
@@ -569,7 +674,21 @@ export const RepositoryView: React.FC = () => {
               {readme ? (
                 <div
                   dangerouslySetInnerHTML={{
-                    __html: renderMarkdownSafe(readme),
+                    __html: renderMarkdownSafe(
+                      readme,
+                      repo
+                        ? {
+                            linkBase: `${repo.webUrl}/blob/HEAD/`,
+                            imageBase:
+                              repo.identity.providerType === "github"
+                                ? `${repo.webUrl.replace(
+                                    "github.com",
+                                    "raw.githubusercontent.com",
+                                  )}/HEAD/`
+                                : `${repo.webUrl}/raw/HEAD/`,
+                          }
+                        : {},
+                    ),
                   }}
                 />
               ) : (
@@ -747,6 +866,15 @@ export const RepositoryView: React.FC = () => {
                     {(repo.saved.aiTags ?? []).map((name) => (
                       <span className="badge violet" key={`ai-${name}`}>
                         {name}
+                        <button
+                          type="button"
+                          className="badge-add"
+                          title="转为手动标签"
+                          aria-label={`把 ${name} 转为手动标签`}
+                          onClick={() => void adoptAiTag(name)}
+                        >
+                          +
+                        </button>
                       </span>
                     ))}
                   </div>
@@ -766,6 +894,7 @@ export const RepositoryView: React.FC = () => {
                   onChange={(e) => {
                     setNoteDraft(e.target.value);
                     setNoteState((s) => noteSaveReducer(s, { type: "edit" }));
+                    queueDraft(e.target.value);
                   }}
                   onBlur={(e) => void saveNote(e.target.value)}
                 />
@@ -855,7 +984,7 @@ export const RepositoryView: React.FC = () => {
                   <div>
                     <span>平台</span>
                     <span className="row gap8">
-                      {repo.providerType === "github" ? (
+                      {repo.identity.providerType === "github" ? (
                         <svg className="ico small" viewBox="0 0 24 24">
                           <path
                             d="M9 20c-5 1-5-2-7-3m14 5v-4a3.5 3.5 0 0 0-1-2.8c3.4-.4 7-1.7 7-7.3a5.5 5.5 0 0 0-1.5-3.8A5 5 0 0 0 20 0s-1.3-.4-4 1.5a13 13 0 0 0-8 0C5.3-.4 4 0 4 0a5 5 0 0 0-.5 3.1A5.5 5.5 0 0 0 2 6.9c0 5.6 3.6 6.9 7 7.3A3.5 3.5 0 0 0 8 17v5"
@@ -863,7 +992,7 @@ export const RepositoryView: React.FC = () => {
                           />
                         </svg>
                       ) : null}
-                      {repo.providerType.toUpperCase()}
+                      {repo.identity.providerType.toUpperCase()}
                     </span>
                   </div>
                   <div>
@@ -905,7 +1034,7 @@ export const RepositoryView: React.FC = () => {
               <div className="repo-facts">
                 <div>
                   <span>平台</span>
-                  <span>{repo.providerType.toUpperCase()}</span>
+                  <span>{repo.identity.providerType.toUpperCase()}</span>
                 </div>
                 <div>
                   <span>主要语言</span>

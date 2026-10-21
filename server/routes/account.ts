@@ -2,6 +2,10 @@ import { Hono } from "hono";
 import { requireUser, type AuthedVariables } from "../middleware/auth.js";
 import { buildAccountExport } from "../services/accountExport.js";
 import {
+  applyAccountImport,
+  planAccountImport,
+} from "../services/accountImport.js";
+import {
   requestDeletion,
   confirmDeletion,
   hasPendingDeletion,
@@ -20,6 +24,31 @@ accountRoutes.use("*", requireUser);
 // and provider connection metadata — never any credential material.
 accountRoutes.get("/export", (c) => {
   return c.json(buildAccountExport(c.get("userId")));
+});
+
+// Portable restore (M8-09): dry-run by default; apply only with ?dryRun=0/false.
+// Credentials, sessions and publication state are never restored.
+accountRoutes.post("/import", async (c) => {
+  const userId = c.get("userId");
+  let body: { bundle?: unknown; dryRun?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return apiError(c, 400, "VALIDATION", "Request body must be JSON");
+  }
+  const dryRun =
+    c.req.query("dryRun") !== "0" && c.req.query("dryRun") !== "false"
+      ? body.dryRun !== false
+      : false;
+  const result = dryRun
+    ? planAccountImport(userId, body.bundle)
+    : applyAccountImport(userId, body.bundle);
+  if (!result.ok) {
+    return apiError(c, 400, "VALIDATION", "Import failed", {
+      errors: result.errors,
+    });
+  }
+  return c.json(result);
 });
 
 accountRoutes.post("/delete", (c) => {

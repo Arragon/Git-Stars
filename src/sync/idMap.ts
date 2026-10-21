@@ -7,6 +7,7 @@
 // (the create is replayed idempotently and returns the same id).
 
 import type { IdMapEntry } from "../data/types";
+import { getAccountScope, isVisibleToScope } from "./accountScope";
 
 /**
  * Deep-rewrite every string that matches a temp id, leaving everything else untouched.
@@ -40,18 +41,31 @@ export interface IdMapStore {
   putIdMapEntry(entry: IdMapEntry): Promise<void>;
 }
 
-export function createIdResolver(store: IdMapStore): IdResolver {
+export function createIdResolver(
+  store: IdMapStore,
+  getOwnerId: () => string | null = getAccountScope,
+): IdResolver {
   return {
     async resolveRefs(refs) {
+      const owner = getOwnerId();
       const map = new Map<string, string>();
       for (const ref of refs) {
         const entry = await store.getIdMapEntry(ref);
-        if (entry) map.set(ref, entry.serverId);
+        if (!entry || !isVisibleToScope(entry.ownerId, owner)) continue;
+        // Legacy entries are claimed by the first signed-in scope that resolves them.
+        if (!entry.ownerId && owner) {
+          await store.putIdMapEntry({ ...entry, ownerId: owner });
+        }
+        map.set(ref, entry.serverId);
       }
       return map;
     },
     async record(entry) {
-      await store.putIdMapEntry(entry);
+      const owner = getOwnerId() ?? undefined;
+      await store.putIdMapEntry({
+        ...entry,
+        ...(owner ? { ownerId: owner } : {}),
+      });
     },
   };
 }

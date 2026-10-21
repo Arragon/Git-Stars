@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { setAccountScope } from "../sync/accountScope";
 
 export interface SessionUser {
   id: string;
@@ -22,7 +23,11 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  setUser: (user) => set({ user }),
+  // Keep offline state scoped to the signed-in account (M8-X).
+  setUser: (user) => {
+    setAccountScope(user?.id ?? null);
+    set({ user });
+  },
   isLoading: true,
   setIsLoading: (isLoading) => set({ isLoading }),
   devLoginEnabled: false,

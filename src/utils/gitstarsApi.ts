@@ -8,6 +8,10 @@ const idemKey = (): string =>
     ? globalThis.crypto.randomUUID()
     : String(Math.random());
 
+// The library list projects repository identity flat (SavedRepository.repository),
+// while the detail view nests it under `identity` (see server/openapi.yaml
+// RepositoryView). Keep both shapes distinct so the client cannot mix them up
+// (M8-10 e2e found a runtime crash from reading `providerType` on the detail view).
 export interface RepositoryProjection {
   id: string;
   providerType: string;
@@ -23,6 +27,12 @@ export interface RepositoryProjection {
   starsCount: number;
   forksCount: number;
   status: string;
+}
+
+export interface RepositoryIdentityView {
+  providerType: string;
+  host: string;
+  remoteId: string;
 }
 
 export interface SavedRepository {
@@ -53,7 +63,20 @@ export interface RepositoryCapabilities {
   privateRepos: boolean;
 }
 
-export interface RepositoryDetailView extends RepositoryProjection {
+export interface RepositoryDetailView {
+  id: string;
+  identity: RepositoryIdentityView;
+  canonicalKey: string;
+  name: string;
+  namespacePath?: string;
+  webUrl: string;
+  description?: string;
+  visibility?: string;
+  primaryLanguage?: string;
+  starsCount: number;
+  forksCount: number;
+  status: string;
+  metadataFetchedAt?: string;
   capabilities: RepositoryCapabilities | null;
   saved: {
     id: string;
@@ -269,6 +292,15 @@ export interface SearchItemView {
   description: string | null;
   starsCount: number;
 }
+export interface ResolveRepositoryResponse {
+  repositoryId: string;
+  repository: RepositoryDetailView | null;
+}
+
+/** Resolve a pasted GitHub URL (or owner/repo) into a cached repository (M8-02). */
+export const resolveRepositoryUrl = (url: string) =>
+  apiPost<ResolveRepositoryResponse>("/api/repositories/resolve", { url });
+
 export const searchRepositories = (q: string, provider = "github") =>
   apiGet<{ items: SearchItemView[]; total?: number }>(
     `/api/discover/search?q=${encodeURIComponent(q)}&provider=${encodeURIComponent(provider)}`,
@@ -319,6 +351,37 @@ export const revokeProvider = (providerType: string, host?: string) =>
   );
 
 // Account ownership (INH-476): full data export + two-step deletion.
+export interface AccountImportCounts {
+  repositories: number;
+  savedCreate: number;
+  savedExisting: number;
+  unresolved: number;
+  tagsCreate: number;
+  tagLinks: number;
+  listsCreate: number;
+  listsExisting: number;
+  listItems: number;
+  preferences: "apply" | "keep";
+}
+
+export interface AccountImportResponse {
+  ok: boolean;
+  dryRun: boolean;
+  counts?: AccountImportCounts;
+  errors: string[];
+}
+
+/** Dry-run an account restore (M8-09). */
+export const planAccountImport = (bundle: unknown) =>
+  apiPost<AccountImportResponse>("/api/account/import", { bundle });
+
+/** Apply a previously previewed account restore. */
+export const applyAccountImport = (bundle: unknown) =>
+  apiPost<AccountImportResponse>("/api/account/import?dryRun=0", {
+    bundle,
+    dryRun: false,
+  });
+
 export const exportAccountData = () => apiGet<unknown>("/api/account/export");
 export interface DeletionRequestResponse {
   confirmation: string;
@@ -343,6 +406,7 @@ export interface PublicationView {
   updatedAt: string;
   shareUrl: string;
   hubOptIn: boolean;
+  hasUnpublishedChanges: boolean;
 }
 
 export const publishList = (listId: string) =>
